@@ -25,6 +25,7 @@
 
 INA226_WE inaSolar   = INA226_WE(INA226_SOLAR_ADDR);    // Sensor object bound to the solar sensor's I2C address
 INA226_WE inaBattery = INA226_WE(INA226_BATTERY_ADDR);  // Sensor object bound to the battery/charge-output sensor's I2C address
+INA226_WE inaWind    = INA226_WE(INA226_WIND_ADDR);     // Sensor object bound to the wind branch sensor's I2C address
 
 void sensors_init() {
   Wire.begin();   // Join I2C bus as controller (Mega: SDA=pin20, SCL=pin21)
@@ -35,7 +36,10 @@ void sensors_init() {
   inaBattery.init();                                              // Reset/configure the battery INA226 chip over I2C
   inaBattery.setResistorRange(INA226_SHUNT_OHMS, INA226_MAX_AMPS); // Same shunt/current-range values -- identical board
 
-  Serial.println(F("Solar and battery INA226 sensors initialized."));   // Confirm setup completed, for debugging over Serial
+  inaWind.init();                                              // Reset/configure the wind branch INA226 chip over I2C
+  inaWind.setResistorRange(INA226_SHUNT_OHMS, INA226_MAX_AMPS); // Same shunt/current-range values -- identical board
+
+  Serial.println(F("Solar, battery, and wind INA226 sensors initialized."));   // Confirm setup completed, for debugging over Serial
 }
 
 // ---------------------------------------------------------------------------
@@ -81,4 +85,51 @@ PowerReading sensors_readBattery() {
   reading.current_A    = inaBattery.getCurrent_mA() / 1000.0;  // Library gives mA -- divide by 1000 for amps
   reading.power_W       = inaBattery.getBusPower() / 1000.0;   // Library gives mW -- divide by 1000 for watts
   return reading;                                              // Hand all three values back to the caller together
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 11: sensors_readWind()
+//
+// WHAT: Takes one reading from the wind branch INA226 and returns it as a
+//       PowerReading, the same shape as sensors_readSolar()/readBattery().
+//
+// HOW:  Identical logic to the other two read functions, just against the
+//       inaWind object/address.
+//
+// WHY:  Lets us monitor and log the wind generation path independently of
+//       solar, matching the block diagram's separate solar/wind branches
+//       feeding into one common DC bus.
+// ---------------------------------------------------------------------------
+
+PowerReading sensors_readWind() {
+  PowerReading reading;                                     // Create an empty struct to fill in below
+  reading.busVoltage_V = inaWind.getBusVoltage_V();         // Already in volts -- no conversion needed
+  reading.current_A    = inaWind.getCurrent_mA() / 1000.0;  // Library gives mA -- divide by 1000 for amps
+  reading.power_W       = inaWind.getBusPower() / 1000.0;   // Library gives mW -- divide by 1000 for watts
+  return reading;                                            // Hand all three values back to the caller together
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 10: sensors_isBatterySensorConnected()
+//
+// WHAT: Probes the battery sensor's I2C address directly, without asking it
+//       for any data, just to see if a device answers at all.
+//
+// HOW:  Wire.beginTransmission()/endTransmission() is the raw I2C
+//       "is anyone listening at this address?" check -- it sends just the
+//       address byte and checks for an ACK. endTransmission() returns 0
+//       only if a device acknowledged; any other value means nothing
+//       responded (not wired, wrong address, powered off, etc.).
+//
+// WHY:  This is deliberately separate from sensors_readBattery(), which
+//       always returns SOME numbers whether or not a real sensor is there
+//       -- the INA226_WE library doesn't distinguish "sensor missing" from
+//       "sensor present and reading near zero." This function is the only
+//       way calling code (ChargeController) can tell those two cases apart.
+// ---------------------------------------------------------------------------
+
+bool sensors_isBatterySensorConnected() {
+  Wire.beginTransmission(INA226_BATTERY_ADDR);   // Start addressing the battery sensor on the I2C bus
+  byte error = Wire.endTransmission();           // Actually send it; 0 = a device ACKed, anything else = no response
+  return (error == 0);                            // true only if the sensor is actually present and responding
 }

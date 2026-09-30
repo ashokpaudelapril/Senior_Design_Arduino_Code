@@ -29,4 +29,24 @@ void chargeController_init();
 void chargeController_update();
 float chargeController_getDutyCycle();
 
+// ---------------------------------------------------------------------------
+// BLOCK 10: fault latching
+//
+// WHAT: chargeController_isFaulted() reports whether the controller has
+//       tripped into its fault state (output forced off) because either the
+//       battery sensor stopped responding, or duty cycle got pinned at its
+//       ceiling for too long without ever reaching the CC target current
+//       (a sign of an open circuit / disconnected battery).
+//
+// WHY:  Once faulted, chargeController_update() keeps forcing 0% duty cycle
+//       every call and will NOT recover on its own -- this is deliberate: a
+//       fault that clears itself and retries automatically could just
+//       ramp back up into the same hazard. Exposing this getter lets other
+//       code (Serial printing, later the display) show the fault state to
+//       whoever's watching, so it's obvious a reset is needed rather than
+//       the system silently sitting there doing nothing.
+// ---------------------------------------------------------------------------
+
+bool chargeController_isFaulted();
+
 #endif

@@ -43,6 +43,21 @@
 #define INA226_BATTERY_ADDR 0x41   // Battery/charge-output sensor, A0 jumper set to VS
 
 // ---------------------------------------------------------------------------
+// BLOCK 11: wind branch sensor address
+//
+// WHAT: I2C address of the third INA226, placed on the wind branch (after
+//       the wind SB540 isolation diode, before the common DC bus) --
+//       mirrors the solar branch's own isolation-diode/sensor arrangement.
+//
+// WHY:  Same reasoning as the battery sensor: this needs its own unique
+//       address so it doesn't collide with the solar (0x40) or battery
+//       (0x41) sensors on the shared I2C bus. Per the INA226 address table,
+//       bridging the A0 jumper to SDA (instead of GND or VS) gives 0x42.
+//       Verify against your specific board once it's in hand.
+// ---------------------------------------------------------------------------
+#define INA226_WIND_ADDR 0x42   // Wind branch sensor, A0 jumper set to SDA
+
+// ---------------------------------------------------------------------------
 // BLOCK 4: loop timing
 //
 // WHAT: How often (in milliseconds) we print a solar reading to Serial.
@@ -54,18 +69,45 @@
 #define SENSOR_PRINT_INTERVAL_MS 1000
 
 // ---------------------------------------------------------------------------
-// BLOCK 5: boost converter gate drive pin
+// BLOCK 5 (upgraded in Block 8): boost converter gate drive pin
 //
 // WHAT: The Mega pin that carries the PWM signal into the TC4427 gate
 //       driver, which switches the GaN device.
 //
-// WHY:  Pin 11 is one of the Mega's 16-bit timer pins (Timer1). We're using
-//       analogWrite() on it for now (Block 5), but choosing a 16-bit-timer
-//       pin now means when we upgrade to true ~100kHz Fast PWM in a later
-//       block, we reconfigure Timer1's registers on this SAME pin instead
-//       of needing to move the wire to the gate driver.
+// WHY:  Pin 11 is Timer1's OC1A output -- a 16-bit hardware timer. Block 5
+//       used plain analogWrite() here as a placeholder; Block 8 reconfigures
+//       Timer1's registers directly for true ~100kHz output on this SAME
+//       pin, so nothing about the physical wiring changes between the two.
 // ---------------------------------------------------------------------------
 #define GATE_DRIVE_PIN 11
+
+// ---------------------------------------------------------------------------
+// BLOCK 8: real hardware-timer PWM frequency
+//
+// WHAT: The actual boost-converter switching frequency (per the block
+//       diagram, ~100kHz) and the Timer1 TOP value that produces it.
+//
+// HOW:  In Fast PWM mode with no prescaling, Timer1 counts up from 0 to
+//       PWM_TOP_VALUE at the Mega's 16MHz clock rate, then resets --that's
+//       one PWM period. So: frequency = F_CPU / (TOP + 1).
+//       Solving for TOP at our target frequency:
+//         TOP = F_CPU / PWM_FREQUENCY_HZ - 1
+//             = 16,000,000 / 100,000 - 1 = 159
+//       F_CPU is defined automatically by the Arduino core (16000000 for
+//       the Mega), so this is computed here rather than hardcoding "159",
+//       in case the target frequency ever changes.
+//
+// WHY:  This TOP value also sets our duty-cycle resolution: OCR1A can be
+//       any whole number from 0 to PWM_TOP_VALUE, so we get (TOP+1) = 160
+//       possible duty-cycle steps (~0.625% each) -- coarser than the 256
+//       steps analogWrite() gave us, because running a 16-bit timer at a
+//       much higher frequency means fewer clock ticks fit in each period.
+//       This is an inherent trade-off between switching frequency and duty
+//       cycle resolution on this hardware, not a bug -- worth knowing when
+//       interpreting the boost converter's behavior on the scope.
+// ---------------------------------------------------------------------------
+#define PWM_FREQUENCY_HZ 100000UL
+#define PWM_TOP_VALUE    ((F_CPU / PWM_FREQUENCY_HZ) - 1)
 
 // ---------------------------------------------------------------------------
 // BLOCK 7: CC/CV charge control targets and tuning
@@ -94,5 +136,75 @@
 #define CHARGE_DUTY_STEP_PERCENT  0.5    // Duty cycle change per control tick
 #define CHARGE_MAX_DUTY_PERCENT   80.0   // Safety ceiling, well below 100%
 #define CONTROL_LOOP_INTERVAL_MS  50     // Run the control loop 20 times/sec
+
+// ---------------------------------------------------------------------------
+// BLOCK 10: fault detection timeout
+//
+// WHAT: How long (in milliseconds) duty cycle is allowed to sit pinned at
+//       CHARGE_MAX_DUTY_PERCENT without reaching the CC target current
+//       before ChargeController treats it as a fault and shuts the output
+//       off.
+//
+// WHY:  A few seconds is enough time to rule out normal startup transients
+//       (e.g. briefly ramping up from 0%) while still catching a genuine
+//       open-circuit/no-load condition quickly, rather than leaving the
+//       boost converter running near its duty-cycle ceiling indefinitely.
+// ---------------------------------------------------------------------------
+#define CHARGE_FAULT_TIMEOUT_MS   3000   // 3 seconds pinned at ceiling = fault
+
+// ---------------------------------------------------------------------------
+// BLOCK 9: manual PWM test mode switch
+//
+// WHAT: A compile-time switch between two ways of driving the boost
+//       converter's duty cycle:
+//         true  = MANUAL mode -- you type a duty-cycle percentage into the
+//                 Serial Monitor and it's applied directly, ignoring
+//                 sensors and the CC/CV algorithm entirely.
+//         false = AUTOMATIC mode -- ChargeController's CC/CV loop drives
+//                 duty cycle based on the battery sensor, as built in
+//                 Block 7.
+//
+// HOW:  Since this is a plain #define (not a variable), the choice is made
+//       at compile time -- flip it and re-upload to switch modes.
+//
+// WHY:  Lets us verify the ~100kHz PWM signal on the oscilloscope in
+//       isolation -- confirming frequency and that duty cycle actually
+//       changes -- WITHOUT needing the battery sensor wired up, and without
+//       the CC/CV loop's tendency to ramp toward its safety ceiling when it
+//       can never reach its current target (e.g. nothing connected to
+//       charge). Set this back to false once ready to test the full closed
+//       loop with real sensors.
+// ---------------------------------------------------------------------------
+#define MANUAL_PWM_TEST_MODE true
+
+// ---------------------------------------------------------------------------
+// BLOCK 12: display + touch pin assignments
+//
+// WHAT: Mega pin connections for the Hosyond 3.5" ST7796U display and its
+//       FT6336U capacitive touch controller, per the module's own pin
+//       function table (VCC, GND, LCD_CS, LCD_RST, LCD_RS, SDI/MOSI, SCK,
+//       LED, SDO/MISO, CTP_SCL, CTP_RST, CTP_SDA, CTP_INT, SD_CS).
+//
+// HOW:  SDI(MOSI), SCK, and SDO(MISO) are NOT defined here -- on the Mega,
+//       hardware SPI is fixed to pins 51, 52, and 50 respectively, so the
+//       display library uses those automatically rather than us choosing
+//       them. CTP_SDA/CTP_SCL aren't defined here either -- they're the
+//       same physical I2C bus (pins 20/21) that Sensors.cpp already uses
+//       for the INA226s, via the same Wire library. SD_CS isn't used at all
+//       since this project doesn't use the display's microSD slot.
+//       The remaining signals (LCD_CS, LCD_RST, LCD_RS, LED, CTP_RST,
+//       CTP_INT) each need their own free digital pin, chosen here to avoid
+//       colliding with GATE_DRIVE_PIN (11) or the hardware SPI/I2C pins.
+//
+// WHY:  Named here (not hardcoded in a Display.cpp file) for the same
+//       reason as every other pin constant in this project -- one place to
+//       check or change the wiring plan.
+// ---------------------------------------------------------------------------
+#define LCD_CS_PIN    10
+#define LCD_RST_PIN   9
+#define LCD_RS_PIN    8    // AKA "DC" (data/command select) in most display libraries
+#define LCD_LED_PIN   7    // Backlight; PWM-capable pin in case dimming is added later
+#define TOUCH_RST_PIN 6
+#define TOUCH_INT_PIN 3    // Interrupt-capable pin on the Mega
 
 #endif

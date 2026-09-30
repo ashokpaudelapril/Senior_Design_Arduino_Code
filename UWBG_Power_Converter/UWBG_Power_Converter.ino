@@ -19,12 +19,19 @@
 #include "Sensors.h"          // Sensor module (INA226 readings)
 #include "BoostConverter.h"   // Boost converter gate-drive module
 #include "ChargeController.h" // CC/CV control logic module
+#include "TestMode.h"         // Manual duty-cycle override for bench testing
+#include "Display.h"          // Display + touch module
 
 void setup() {
   Serial.begin(9600);       // Start Serial at 9600 baud for debug output over USB
-  sensors_init();           // Bring up I2C and calibrate the solar + battery INA226 sensors
+  sensors_init();           // Bring up I2C and calibrate the solar + battery + wind INA226 sensors
   boost_init();             // Gate drive starts at 0% duty -- switch off
   chargeController_init();  // Reset the CC/CV controller's duty cycle state to 0%
+  display_init();           // Bring up the ST7796U display + FT6336U touch controller
+
+  if (MANUAL_PWM_TEST_MODE) {   // Print usage instructions only when the test mode is actually active
+    Serial.println(F("MANUAL PWM TEST MODE: type a duty cycle 0-100 and press Enter."));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +84,36 @@ void printBatteryReading() {
   Serial.print(battery.power_W);
   Serial.print(F(" W | Duty: "));
   Serial.print(chargeController_getDutyCycle());   // Report what the control loop is currently commanding
-  Serial.println(F(" %"));
+  Serial.print(F(" %"));
+
+  if (chargeController_isFaulted()) {   // Make a latched fault impossible to miss in the Serial Monitor
+    Serial.println(F(" | FAULT -- output disabled, reset required"));
+  } else {
+    Serial.println();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 11: printing wind readings in loop()
+//
+// WHAT: Same idea as printSolarReading()/printBatteryReading(), but for the
+//       new wind branch sensor.
+//
+// WHY:  Lets us verify the wind sensor independently once the wind drive
+//       motor and generators are wired up, matching how we brought the
+//       solar and battery sensors online one at a time.
+// ---------------------------------------------------------------------------
+
+void printWindReading() {
+  PowerReading wind = sensors_readWind();   // Take one snapshot reading from the wind branch sensor
+
+  Serial.print(F("Wind: "));
+  Serial.print(wind.busVoltage_V);
+  Serial.print(F(" V, "));
+  Serial.print(wind.current_A);
+  Serial.print(F(" A, "));
+  Serial.print(wind.power_W);
+  Serial.println(F(" W"));
 }
 
 // ---------------------------------------------------------------------------
@@ -108,10 +144,12 @@ void printBatteryReading() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// BLOCK 7: running the CC/CV control loop in loop()
+// BLOCK 7 (branched in Block 9): running the CC/CV control loop in loop()
 //
 // WHAT: Calls chargeController_update() on its own timer, separate from
-//       (and faster than) the once-a-second Serial printing.
+//       (and faster than) the once-a-second Serial printing -- but ONLY
+//       when MANUAL_PWM_TEST_MODE is false. When it's true, testMode_update()
+//       runs instead, so typed Serial input controls duty cycle directly.
 //
 // HOW:  Same millis()-based pattern as the print timer, just with its own
 //       lastControlTime variable and its own interval
@@ -121,7 +159,9 @@ void printBatteryReading() {
 //       output -- printing 20 times a second would flood the Serial
 //       Monitor and be unreadable, but the charger still needs to react
 //       that quickly to stay stable. Two independent timers let each task
-//       run at the pace it actually needs.
+//       run at the pace it actually needs. Branching on MANUAL_PWM_TEST_MODE
+//       here means the two modes can never both try to command duty cycle
+//       at the same time.
 // ---------------------------------------------------------------------------
 
 void loop() {
@@ -129,7 +169,9 @@ void loop() {
   static unsigned long lastControlTime = 0;   // Same idea, for the control loop's own timer
   unsigned long now = millis();               // Current time (ms since board booted), read fresh each pass
 
-  if (now - lastControlTime >= CONTROL_LOOP_INTERVAL_MS) {   // Has a full control interval elapsed?
+  if (MANUAL_PWM_TEST_MODE) {
+    testMode_update();   // Bench-test mode: duty cycle comes from typed Serial input, checked every loop() pass
+  } else if (now - lastControlTime >= CONTROL_LOOP_INTERVAL_MS) {   // Has a full control interval elapsed?
     lastControlTime = now;          // Reset this timer's reference point
     chargeController_update();      // Read battery sensor, adjust duty cycle one step
   }
@@ -137,6 +179,7 @@ void loop() {
   if (now - lastPrintTime >= SENSOR_PRINT_INTERVAL_MS) {   // Has a full print interval elapsed?
     lastPrintTime = now;        // Reset the timer reference point
     printSolarReading();        // Take and print a new solar reading
+    printWindReading();         // Take and print a new wind branch reading
     printBatteryReading();      // Take and print a new battery reading + current duty cycle
   }
 }

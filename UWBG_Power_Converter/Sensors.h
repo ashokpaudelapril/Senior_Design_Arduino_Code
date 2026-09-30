@@ -63,4 +63,35 @@ PowerReading sensors_readSolar();
 
 PowerReading sensors_readBattery();
 
+// ---------------------------------------------------------------------------
+// BLOCK 11: reading the wind branch sensor
+//
+// WHAT: sensors_readWind() takes a reading from the third INA226, placed on
+//       the wind branch after its SB540 isolation diode, mirroring where
+//       the solar sensor sits relative to the solar branch's diode.
+//
+// WHY:  Lets us monitor the wind generation path independently -- the
+//       block diagram's wind system target is ~2-5W combined, and this is
+//       how we'd actually measure it once the wind drive motor/generators
+//       are wired up.
+// ---------------------------------------------------------------------------
+
+PowerReading sensors_readWind();
+
+// ---------------------------------------------------------------------------
+// BLOCK 10: sensor presence check
+//
+// WHAT: Checks whether the battery/charge-output sensor is actually
+//       responding on the I2C bus right now, without reading its data.
+//
+// WHY:  sensors_readBattery() has no way to tell "no sensor here" apart
+//       from "sensor here, reporting near-zero" -- both can come back
+//       looking like 0V/0A. The CC/CV control loop (ChargeController) needs
+//       to know the difference: a missing/disconnected sensor means it's
+//       flying blind and should shut the output off, not keep ramping duty
+//       cycle based on a reading that isn't real.
+// ---------------------------------------------------------------------------
+
+bool sensors_isBatterySensorConnected();
+
 #endif
