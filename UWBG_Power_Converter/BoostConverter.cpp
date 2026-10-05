@@ -15,10 +15,8 @@
 //       low, which is what determines duty cycle: a bigger OCR1A means the
 //       pin stays high longer within each cycle.
 //
-//       Note that boost_setDutyCycle()'s signature hasn't changed at all
-//       from Block 5 -- callers (ChargeController) still just pass a 0-100%
-//       value and don't know or care that the internals switched from
-//       analogWrite() to raw timer registers.
+//       Callers (ChargeController, TestMode) pass a 0-100% value and don't
+//       need to know the internals are raw Timer1 registers.
 //
 // WHY:  boost_setDutyCycle() clamps its input to 0-100% before doing
 //       anything else. Without that, a bug anywhere else in the project

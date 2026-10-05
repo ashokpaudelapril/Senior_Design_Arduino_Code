@@ -2,9 +2,9 @@
 
 All pin numbers below refer to the **Arduino Mega 2560**, and all come directly from `Config.h` — if you rewire something, update `Config.h` to match, not just this document.
 
-## 1.1 I2C Sensor Bus (INA226 × 3)
+## 1.1 I2C Sensor Bus (INA226 × 4, + 1 placeholder)
 
-All three INA226 power monitors share the Mega's single I2C bus:
+All INA226 power monitors share the Mega's single I2C bus:
 
 | Signal | Mega Pin |
 |---|---|
@@ -18,6 +18,8 @@ Each sensor needs a **unique I2C address**, set by bridging its A0/A1 solder jum
 | Solar | `0x40` | A0 = GND, A1 = GND (default) | Solar array output, before its SB540 isolation diode |
 | Battery | `0x41` | A0 = VS, A1 = GND | Boost converter output / battery charging side |
 | Wind | `0x42` | A0 = SDA, A1 = GND | Wind branch output, before its SB540 isolation diode |
+| Common DC Bus | `0x43` | A0 = SCL, A1 = GND | After both isolation diodes combine, right before the boost converter's actual input |
+| Load *(placeholder — do not wire yet)* | `0x44` | A1 = VS, A0 = GND | **No physical location exists yet.** The buck converter (12.8V→5V) is still an undecided hardware choice — this sensor is a code-only placeholder for its future output. Wiring this up before the buck converter exists would just measure nothing meaningful. |
 
 **Verify each jumper against your specific board's silkscreen before soldering** — jumper labeling can vary slightly between suppliers of the CJMCU-226 module.
 

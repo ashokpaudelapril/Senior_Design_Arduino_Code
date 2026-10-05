@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // SENSORS MODULE (implementation)
 //
-// WHAT: Sets up I2C and the solar-array INA226 sensor object, and exposes
-//       sensors_init() to bring it online.
+// WHAT: Sets up I2C and the five INA226 sensor objects (solar, battery,
+//       wind, common bus, load), and exposes sensors_init() to bring them
+//       online.
 //
 // HOW:  INA226_WE measures the voltage across a known shunt resistor to
 //       derive current (I = V_shunt / R_shunt), then combines that with bus
@@ -23,9 +24,11 @@
 #include "Sensors.h"       // This module's own public declarations (PowerReading, etc.)
 #include "Config.h"        // Sensor address + calibration constants
 
-INA226_WE inaSolar   = INA226_WE(INA226_SOLAR_ADDR);    // Sensor object bound to the solar sensor's I2C address
-INA226_WE inaBattery = INA226_WE(INA226_BATTERY_ADDR);  // Sensor object bound to the battery/charge-output sensor's I2C address
-INA226_WE inaWind    = INA226_WE(INA226_WIND_ADDR);     // Sensor object bound to the wind branch sensor's I2C address
+INA226_WE inaSolar     = INA226_WE(INA226_SOLAR_ADDR);      // Sensor object bound to the solar sensor's I2C address
+INA226_WE inaBattery   = INA226_WE(INA226_BATTERY_ADDR);    // Sensor object bound to the battery/charge-output sensor's I2C address
+INA226_WE inaWind      = INA226_WE(INA226_WIND_ADDR);       // Sensor object bound to the wind branch sensor's I2C address
+INA226_WE inaCommonBus = INA226_WE(INA226_COMMONBUS_ADDR);  // Sensor object bound to the common DC bus sensor's I2C address
+INA226_WE inaLoad      = INA226_WE(INA226_LOAD_ADDR);       // Sensor object bound to the load sensor's I2C address (PLACEHOLDER -- see Config.h)
 
 void sensors_init() {
   Wire.begin();   // Join I2C bus as controller (Mega: SDA=pin20, SCL=pin21)
@@ -39,7 +42,13 @@ void sensors_init() {
   inaWind.init();                                              // Reset/configure the wind branch INA226 chip over I2C
   inaWind.setResistorRange(INA226_SHUNT_OHMS, INA226_MAX_AMPS); // Same shunt/current-range values -- identical board
 
-  Serial.println(F("Solar, battery, and wind INA226 sensors initialized."));   // Confirm setup completed, for debugging over Serial
+  inaCommonBus.init();                                              // Reset/configure the common bus INA226 chip over I2C
+  inaCommonBus.setResistorRange(INA226_SHUNT_OHMS, INA226_MAX_AMPS); // Same shunt/current-range values -- identical board
+
+  inaLoad.init();                                              // Harmless if not physically wired yet -- I2C just won't get ACKed
+  inaLoad.setResistorRange(INA226_SHUNT_OHMS, INA226_MAX_AMPS); // Same placeholder shunt/current-range values as the others
+
+  Serial.println(F("Solar, battery, wind, common bus, and load INA226 sensors initialized."));   // Confirm setup completed, for debugging over Serial
 }
 
 // ---------------------------------------------------------------------------
@@ -75,8 +84,8 @@ PowerReading sensors_readSolar() {
 // HOW:  Identical logic to sensors_readSolar(), just against the inaBattery
 //       object/address instead of inaSolar.
 //
-// WHY:  This is the measurement the CC/CV charging algorithm (Block 7) will
-//       compare against our 1.0A CC / 14.4V CV targets.
+// WHY:  This is the measurement the CC/CV charging algorithm compares against
+//       our 1.0A CC / 14.4V CV targets.
 // ---------------------------------------------------------------------------
 
 PowerReading sensors_readBattery() {
@@ -106,6 +115,53 @@ PowerReading sensors_readWind() {
   reading.busVoltage_V = inaWind.getBusVoltage_V();         // Already in volts -- no conversion needed
   reading.current_A    = inaWind.getCurrent_mA() / 1000.0;  // Library gives mA -- divide by 1000 for amps
   reading.power_W       = inaWind.getBusPower() / 1000.0;   // Library gives mW -- divide by 1000 for watts
+  return reading;                                            // Hand all three values back to the caller together
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 15: sensors_readCommonBus()
+//
+// WHAT: Takes one reading from the common DC bus INA226 and returns it as a
+//       PowerReading, the same shape as the other three read functions.
+//
+// HOW:  Identical logic to sensors_readSolar()/readWind()/readBattery(),
+//       just against the inaCommonBus object/address.
+//
+// WHY:  This is the true boost-converter input measurement -- placed after
+//       both isolation diodes combine, so it captures their forward-voltage
+//       drop. Efficiency.cpp uses it as the input power.
+// ---------------------------------------------------------------------------
+
+PowerReading sensors_readCommonBus() {
+  PowerReading reading;                                          // Create an empty struct to fill in below
+  reading.busVoltage_V = inaCommonBus.getBusVoltage_V();         // Already in volts -- no conversion needed
+  reading.current_A    = inaCommonBus.getCurrent_mA() / 1000.0;  // Library gives mA -- divide by 1000 for amps
+  reading.power_W       = inaCommonBus.getBusPower() / 1000.0;   // Library gives mW -- divide by 1000 for watts
+  return reading;                                                 // Hand all three values back to the caller together
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 17: sensors_readLoad() -- PLACEHOLDER, see Config.h
+//
+// WHAT: Takes one reading from the load INA226 and returns it as a
+//       PowerReading, the same shape as the other four read functions.
+//
+// HOW:  Identical logic to the others, just against the inaLoad
+//       object/address.
+//
+// WHY THIS IS A PLACEHOLDER: with no buck converter built yet, this sensor
+//       isn't physically attached to anything meaningful. Calling this
+//       function right now will behave like reading any other disconnected
+//       INA226 -- likely near-zero or stale values, NOT an error, and NOT
+//       trustworthy data. This exists so wiring it up later is a five-
+//       minute repeat of this exact pattern, not a new design exercise.
+// ---------------------------------------------------------------------------
+
+PowerReading sensors_readLoad() {
+  PowerReading reading;                                     // Create an empty struct to fill in below
+  reading.busVoltage_V = inaLoad.getBusVoltage_V();         // Already in volts -- no conversion needed
+  reading.current_A    = inaLoad.getCurrent_mA() / 1000.0;  // Library gives mA -- divide by 1000 for amps
+  reading.power_W       = inaLoad.getBusPower() / 1000.0;   // Library gives mW -- divide by 1000 for watts
   return reading;                                            // Hand all three values back to the caller together
 }
 

@@ -9,6 +9,7 @@ This manual covers how to wire, set up, and operate the Arduino firmware for the
 3. [03-Operating-Modes.md](03-Operating-Modes.md) — manual PWM test mode vs. automatic CC/CV charging
 4. [04-Serial-Output-Reference.md](04-Serial-Output-Reference.md) — what every Serial Monitor message means
 5. [05-Troubleshooting.md](05-Troubleshooting.md) — faults, common issues, and how to resolve them
+6. [06-Display-Guide.md](06-Display-Guide.md) — the tabbed touch screen: what each tab shows and how to switch tabs
 
 ## Quick Start
 

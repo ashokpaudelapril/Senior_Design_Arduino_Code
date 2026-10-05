@@ -4,16 +4,15 @@
 // ---------------------------------------------------------------------------
 // CONFIG: shared hardware addresses and calibration constants
 //
-// WHAT: One place for hardware values that multiple modules need (right now
-//       just Sensors.cpp, later BoostConverter.cpp and Display.cpp too),
-//       instead of repeating magic numbers in every file.
+// WHAT: One place for hardware values that multiple modules need (sensors,
+//       boost converter, charge controller, display), instead of repeating
+//       magic numbers in every file.
 //
 // HOW:  Plain #define constants. No RAM cost, and any .cpp file that
 //       #includes "Config.h" can see them.
 //
-// WHY:  If a sensor address or the shunt resistor value changes (e.g. when
-//       we wire in the second INA226 for the wind branch), we edit it here
-//       once instead of hunting through every module that uses it.
+// WHY:  If a sensor address or the shunt resistor value changes, we edit it
+//       here once instead of hunting through every module that uses it.
 // ---------------------------------------------------------------------------
 
 #define INA226_SOLAR_ADDR   0x40    // Solar array output sensor, A0=A1=GND
@@ -34,11 +33,11 @@
 //       Verify this against your specific board's silkscreen/datasheet once
 //       it's in hand -- the jumper labeling can vary slightly by supplier.
 //
-// WHY:  The CC/CV charging algorithm (Block 7) needs to regulate the actual
-//       current/voltage going INTO the battery, not the solar array's
-//       output -- those two are different once the boost converter is
-//       stepping voltage/current up between them. We need this second,
-//       independent measurement point to control against.
+// WHY:  The CC/CV charging algorithm regulates the actual current/voltage
+//       going INTO the battery, not the solar array's output -- those two
+//       are different once the boost converter is stepping voltage/current
+//       up between them. This second, independent measurement point is what
+//       it controls against.
 // ---------------------------------------------------------------------------
 #define INA226_BATTERY_ADDR 0x41   // Battery/charge-output sensor, A0 jumper set to VS
 
@@ -56,6 +55,49 @@
 //       Verify against your specific board once it's in hand.
 // ---------------------------------------------------------------------------
 #define INA226_WIND_ADDR 0x42   // Wind branch sensor, A0 jumper set to SDA
+
+// ---------------------------------------------------------------------------
+// BLOCK 15: common DC bus sensor address
+//
+// WHAT: I2C address of the fourth INA226, placed on the common DC bus --
+//       AFTER both isolation diodes combine the solar and wind branches,
+//       right before the boost converter's actual input.
+//
+// WHY:  Same reasoning as the other added sensors: needs its own unique
+//       address (0x40/0x41/0x42 already taken). Per the INA226 address
+//       table, bridging the A0 jumper to SCL gives 0x43. Verify against
+//       your specific board once it's in hand.
+//
+//       This sensor also feeds Efficiency.cpp as the boost converter's
+//       input power.
+// ---------------------------------------------------------------------------
+#define INA226_COMMONBUS_ADDR 0x43   // Common DC bus sensor, A0 jumper set to SCL
+
+// ---------------------------------------------------------------------------
+// BLOCK 17: load sensor address -- PLACEHOLDER, no hardware location yet
+//
+// WHAT: I2C address reserved for a fifth INA226, intended to measure power
+//       delivered to the "model loads" (home/EV/data-center demo loads per
+//       the block diagram) downstream of the buck converter.
+//
+// HOW:  Per the INA226 address table, A1=VS / A0=GND gives 0x44 -- the next
+//       unused combination after 0x40/0x41/0x42/0x43. Verify against your
+//       specific board once wired.
+//
+// WHY THIS IS A PLACEHOLDER: the buck converter (12.8V battery -> 5V bus)
+//       is still an undecided hardware choice in the block diagram --
+//       switch, inductor, diode, and driver are all still blank. That means
+//       there is currently no physical "buck converter output" node to
+//       attach this sensor to. This address and the read function below
+//       exist so the code pattern is ready -- wiring it up later, once the
+//       buck converter exists, should be a quick repeat of the same steps
+//       used for the other four sensors, not a new design exercise. Until
+//       then, sensors_readLoad() will return whatever a disconnected/
+//       nonexistent sensor returns (see sensors_isBatterySensorConnected()
+//       for how to tell "not really there" apart from "reading zero") --
+//       don't trust these numbers for anything yet.
+// ---------------------------------------------------------------------------
+#define INA226_LOAD_ADDR 0x44   // Load sensor (PLACEHOLDER), A1 jumper set to VS
 
 // ---------------------------------------------------------------------------
 // BLOCK 4: loop timing
@@ -138,6 +180,32 @@
 #define CONTROL_LOOP_INTERVAL_MS  50     // Run the control loop 20 times/sec
 
 // ---------------------------------------------------------------------------
+// BLOCK 16: hard safety cutoff limits
+//
+// WHAT: Absolute voltage/current limits at the battery sensor that trigger
+//       an immediate fault, completely independent of the CC/CV targets
+//       above or which operating mode (manual or automatic) is active.
+//
+// HOW:  Modest headroom above the CC/CV targets: 15.0V vs. the 14.4V CV
+//       cap, 1.5A vs. the 1.0A CC target. Enough margin that normal
+//       operation (including the step-controller's small overshoot as it
+//       approaches its targets) won't false-trip this, but tight enough to
+//       catch a real malfunction quickly. Both limits sit well inside the
+//       battery's own rated maximums (14.4V max charge voltage, 4A max
+//       charge current per its datasheet), so tripping here protects the
+//       battery even if the CC/CV logic itself is misbehaving.
+//
+// WHY:  The CC/CV targets and the open-circuit fault detector (Block 10)
+//       only protect the AUTOMATIC mode's control loop. Manual PWM test
+//       mode (Block 9) has no protection at all otherwise -- a person
+//       typing an unsafe duty cycle value has nothing stopping them. This
+//       hard limit check runs regardless of mode, specifically to close
+//       that gap.
+// ---------------------------------------------------------------------------
+#define HARD_LIMIT_MAX_VOLTAGE_V 15.0
+#define HARD_LIMIT_MAX_CURRENT_A 1.5
+
+// ---------------------------------------------------------------------------
 // BLOCK 10: fault detection timeout
 //
 // WHAT: How long (in milliseconds) duty cycle is allowed to sit pinned at
@@ -206,5 +274,42 @@
 #define LCD_LED_PIN   7    // Backlight; PWM-capable pin in case dimming is added later
 #define TOUCH_RST_PIN 6
 #define TOUCH_INT_PIN 3    // Interrupt-capable pin on the Mega
+
+// ---------------------------------------------------------------------------
+// BLOCK 18: display refresh interval
+//
+// WHAT: How often (in milliseconds) the live screen redraws its values.
+//
+// WHY:  Redrawing every loop() pass would waste SPI time and make the
+//       screen flicker. Half a second is fast enough to follow the
+//       readings while leaving time for the control loop and sensor reads.
+// ---------------------------------------------------------------------------
+#define DISPLAY_UPDATE_INTERVAL_MS 500
+
+// ---------------------------------------------------------------------------
+// BLOCK 19: touch polling interval
+//
+// WHAT: How often (in milliseconds) the touch controller is checked for a tap
+//        on the tab bar.
+//
+// WHY:  Checking every loop() pass would flood the I2C bus. 100 ms still
+//       feels instant to a person tapping the screen.
+// ---------------------------------------------------------------------------
+#define DISPLAY_TOUCH_POLL_INTERVAL_MS 100
+
+// ---------------------------------------------------------------------------
+// BLOCK 14: efficiency calculation threshold
+//
+// WHAT: The minimum common DC bus input power (in watts) required before we
+//       bother computing an efficiency percentage.
+//
+// WHY:  Efficiency = output power / input power. When input power is very
+//       small (near 0W, e.g. at dawn/dusk or with no wind), sensor noise in
+//       the denominator can produce wildly misleading percentages (even
+//       >100% or huge swings) that don't reflect anything real about the
+//       converter. Below this threshold we just report 0% instead of a
+//       noisy, meaningless ratio.
+// ---------------------------------------------------------------------------
+#define EFFICIENCY_MIN_INPUT_POWER_W 0.1
 
 #endif

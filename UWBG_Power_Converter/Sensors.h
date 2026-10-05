@@ -5,9 +5,8 @@
 // SENSORS MODULE (public interface)
 //
 // WHAT: The functions other modules are allowed to call to work with the
-//       power-monitoring sensors. Right now that's just the solar-array
-//       INA226; more sensors (wind branch, common bus, battery, etc.) will
-//       get their own init/read entries here as we bring each one online.
+//       power-monitoring sensors: solar, wind, common DC bus, battery/charge
+//       output, and load (placeholder until the buck converter exists).
 //
 // HOW:  sensors_init() brings up I2C and calibrates each sensor -- call it
 //       once from setup(). Other modules only see these function
@@ -56,9 +55,9 @@ PowerReading sensors_readSolar();
 // WHAT: sensors_readBattery() takes a reading from the second INA226,
 //       placed at the boost converter's output (battery/charging side).
 //
-// WHY:  This is what the CC/CV charging algorithm (Block 7) will regulate
-//       against -- it needs to know the actual voltage/current reaching the
-//       battery, not the solar array's output.
+// WHY:  This is what the CC/CV charging algorithm (ChargeController) regulates
+//       against -- it needs the actual voltage/current reaching the battery,
+//       not the solar array's output.
 // ---------------------------------------------------------------------------
 
 PowerReading sensors_readBattery();
@@ -77,6 +76,33 @@ PowerReading sensors_readBattery();
 // ---------------------------------------------------------------------------
 
 PowerReading sensors_readWind();
+
+// ---------------------------------------------------------------------------
+// BLOCK 15: reading the common DC bus sensor
+//
+// WHAT: sensors_readCommonBus() takes a reading from the fourth INA226,
+//       placed after both isolation diodes combine, right before the boost
+//       converter's actual input.
+//
+// WHY:  This is the true boost-converter input measurement. It sits after the
+//       isolation diodes, so its reading already includes their forward-voltage
+//       drop, which is what Efficiency.cpp uses as input power.
+// ---------------------------------------------------------------------------
+
+PowerReading sensors_readCommonBus();
+
+// ---------------------------------------------------------------------------
+// BLOCK 17: reading the load sensor -- PLACEHOLDER, see Config.h
+//
+// WHAT: sensors_readLoad() takes a reading from the fifth INA226, intended
+//       for the buck converter's load-side output.
+//
+// WHY THIS IS A PLACEHOLDER: no buck converter hardware exists yet (see
+//       Config.h's INA226_LOAD_ADDR comment) -- this function exists so the
+//       pattern is ready, not because there's a real reading to trust yet.
+// ---------------------------------------------------------------------------
+
+PowerReading sensors_readLoad();
 
 // ---------------------------------------------------------------------------
 // BLOCK 10: sensor presence check

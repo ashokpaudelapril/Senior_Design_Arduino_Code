@@ -2,9 +2,9 @@
 // UWBG_Power_Converter.ino -- main sketch file
 //
 // WHAT: The top-level file Arduino IDE compiles first. Its job is just to
-//       call into the modules (Sensors, and later BoostConverter, Display)
-//       from setup()/loop() -- it shouldn't contain sensor/control logic
-//       itself.
+//       call into the modules (Sensors, BoostConverter, ChargeController,
+//       TestMode, Efficiency, Display) from setup()/loop() -- it shouldn't
+//       contain sensor/control logic itself.
 //
 // HOW:  #include "Sensors.h" pulls in that module's public functions.
 //       Because Sensors.cpp is in the same sketch folder, the Arduino IDE
@@ -21,10 +21,11 @@
 #include "ChargeController.h" // CC/CV control logic module
 #include "TestMode.h"         // Manual duty-cycle override for bench testing
 #include "Display.h"          // Display + touch module
+#include "Efficiency.h"       // Power-in vs. power-out efficiency calculation
 
 void setup() {
   Serial.begin(9600);       // Start Serial at 9600 baud for debug output over USB
-  sensors_init();           // Bring up I2C and calibrate the solar + battery + wind INA226 sensors
+  sensors_init();           // Bring up I2C and calibrate the solar + battery + wind + common bus + load INA226 sensors
   boost_init();             // Gate drive starts at 0% duty -- switch off
   chargeController_init();  // Reset the CC/CV controller's duty cycle state to 0%
   display_init();           // Bring up the ST7796U display + FT6336U touch controller
@@ -69,8 +70,7 @@ void printSolarReading() {
 //       charge-output sensor.
 //
 // WHY:  Lets us verify the battery sensor's readings (against a multimeter,
-//       once hardware is wired up) before Block 7's CC/CV logic starts
-//       trusting this sensor to control the charger.
+//       once hardware is wired up), since the CC/CV logic depends on them.
 // ---------------------------------------------------------------------------
 
 void printBatteryReading() {
@@ -114,6 +114,102 @@ void printWindReading() {
   Serial.print(F(" A, "));
   Serial.print(wind.power_W);
   Serial.println(F(" W"));
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 15: printing common DC bus readings in loop()
+//
+// WHAT: Same idea as the other sensor print functions, but for the new
+//       common DC bus sensor.
+//
+// WHY:  Lets us verify this sensor independently -- it's also what
+//       Efficiency.cpp now uses directly as the boost converter's true
+//       input power.
+// ---------------------------------------------------------------------------
+
+void printCommonBusReading() {
+  PowerReading bus = sensors_readCommonBus();   // Take one snapshot reading from the common bus sensor
+
+  Serial.print(F("Common Bus: "));
+  Serial.print(bus.busVoltage_V);
+  Serial.print(F(" V, "));
+  Serial.print(bus.current_A);
+  Serial.print(F(" A, "));
+  Serial.print(bus.power_W);
+  Serial.println(F(" W"));
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 17: printing load readings in loop() -- PLACEHOLDER, see Config.h
+//
+// WHAT: Same idea as the other sensor print functions, but for the
+//       not-yet-wired load sensor.
+//
+// WHY:  Printed with a "(placeholder)" label so these numbers are never
+//       mistaken for real load data in the Serial Monitor while the buck
+//       converter doesn't exist yet -- once it does, drop the label.
+// ---------------------------------------------------------------------------
+
+void printLoadReading() {
+  PowerReading load = sensors_readLoad();   // Take one snapshot reading from the (not yet real) load sensor
+
+  Serial.print(F("Load (placeholder): "));
+  Serial.print(load.busVoltage_V);
+  Serial.print(F(" V, "));
+  Serial.print(load.current_A);
+  Serial.print(F(" A, "));
+  Serial.print(load.power_W);
+  Serial.println(F(" W"));
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 14: printing efficiency in loop()
+//
+// WHAT: Prints the common DC bus input power, battery output power,
+//       and the resulting efficiency percentage.
+//
+// WHY:  Surfaces the converter's real-world performance directly in the
+//       same Serial output as the individual sensor readings, so it's easy
+//       to sanity-check against the expected boost-converter behavior
+//       while testing.
+// ---------------------------------------------------------------------------
+
+void printEfficiency() {
+  EfficiencyReading eff = efficiency_calculate();   // One combined snapshot across all three sensors
+
+  Serial.print(F("Efficiency: In="));
+  Serial.print(eff.inputPower_W);
+  Serial.print(F("W, Out="));
+  Serial.print(eff.outputPower_W);
+  Serial.print(F("W, Eff="));
+  Serial.print(eff.efficiencyPercent);
+  Serial.println(F("%"));
+}
+
+// ---------------------------------------------------------------------------
+// BLOCK 18: updating the live display in loop()
+//
+// WHAT: Gathers the current values from the sensor, control, and efficiency
+//       modules, and hands them to display_update() to draw.
+//
+// HOW:  Reads each sensor once, along with the duty cycle, efficiency, and
+//       fault flag, and packs them into a DisplayData struct. The display
+//       module only draws what it receives.
+//
+// WHY:  Keeps the display free of calculations and sensor code. This
+//       function is the only place that connects the two.
+// ---------------------------------------------------------------------------
+
+void updateDisplay() {
+  DisplayData data;
+  data.solar = sensors_readSolar();
+  data.wind = sensors_readWind();
+  data.commonBus = sensors_readCommonBus();
+  data.battery = sensors_readBattery();
+  data.dutyPercent = chargeController_getDutyCycle();
+  data.efficiencyPercent = efficiency_calculate().efficiencyPercent;
+  data.faulted = chargeController_isFaulted();
+  display_update(data);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +263,8 @@ void printWindReading() {
 void loop() {
   static unsigned long lastPrintTime = 0;     // Remembers the millis() value at the last print, kept between loop() calls
   static unsigned long lastControlTime = 0;   // Same idea, for the control loop's own timer
+  static unsigned long lastDisplayTime = 0;   // Same idea, for the display refresh timer
+  static unsigned long lastTouchTime = 0;     // Same idea, for the touch poll timer
   unsigned long now = millis();               // Current time (ms since board booted), read fresh each pass
 
   if (MANUAL_PWM_TEST_MODE) {
@@ -176,10 +274,29 @@ void loop() {
     chargeController_update();      // Read battery sensor, adjust duty cycle one step
   }
 
+  // BLOCK 16: hard safety cutoff -- runs every single loop() pass, unconditionally,
+  // regardless of which mode is active. Placed AFTER the mode branch above so it
+  // always has the final say over duty cycle each pass, overriding either mode
+  // if voltage/current exceed the absolute limits in Config.h.
+  chargeController_checkHardLimits();
+
+  if (now - lastTouchTime >= DISPLAY_TOUCH_POLL_INTERVAL_MS) {   // Has a full touch poll interval elapsed?
+    lastTouchTime = now;
+    display_handleTouch();   // Switch tabs if the user tapped the tab bar
+  }
+
+  if (now - lastDisplayTime >= DISPLAY_UPDATE_INTERVAL_MS) {   // Has a full display interval elapsed?
+    lastDisplayTime = now;
+    updateDisplay();
+  }
+
   if (now - lastPrintTime >= SENSOR_PRINT_INTERVAL_MS) {   // Has a full print interval elapsed?
     lastPrintTime = now;        // Reset the timer reference point
     printSolarReading();        // Take and print a new solar reading
     printWindReading();         // Take and print a new wind branch reading
+    printCommonBusReading();    // Take and print a new common DC bus reading
     printBatteryReading();      // Take and print a new battery reading + current duty cycle
+    printLoadReading();         // Take and print a new load reading (placeholder -- no buck converter yet)
+    printEfficiency();          // Take and print combined input/output power + efficiency
   }
 }

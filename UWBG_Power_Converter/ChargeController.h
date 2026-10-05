@@ -49,4 +49,29 @@ float chargeController_getDutyCycle();
 
 bool chargeController_isFaulted();
 
+// ---------------------------------------------------------------------------
+// BLOCK 16: hard safety cutoff, independent of operating mode
+//
+// WHAT: chargeController_checkHardLimits() reads the battery sensor and
+//       immediately faults (forcing 0% duty) if voltage or current exceed
+//       the absolute limits in Config.h -- regardless of whether automatic
+//       CC/CV control or manual test mode is currently active.
+//
+// HOW:  Call this once per loop() pass, UNCONDITIONALLY (not inside the
+//       MANUAL_PWM_TEST_MODE branch), and call it AFTER whichever mode's
+//       own update function ran that pass. Running it last means it always
+//       has the final say over the actual duty cycle each loop iteration --
+//       if manual mode just commanded an unsafe value, this overrides it
+//       before the next print/observation.
+//
+// WHY:  chargeController_update()'s existing fault checks (missing sensor,
+//       pinned-at-ceiling timeout) only run as part of the automatic CC/CV
+//       loop -- they never execute at all in manual test mode. This
+//       function is separate specifically so it protects BOTH modes using
+//       the same shared fault latch (chargeController_isFaulted() reports
+//       true regardless of which check tripped it).
+// ---------------------------------------------------------------------------
+
+void chargeController_checkHardLimits();
+
 #endif

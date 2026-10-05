@@ -135,3 +135,49 @@ float chargeController_getDutyCycle() {
 bool chargeController_isFaulted() {
   return faulted;   // Report whether the controller has latched into its fault state
 }
+
+// ---------------------------------------------------------------------------
+// BLOCK 16: chargeController_checkHardLimits()
+//
+// WHAT: Independent absolute-limit check -- runs regardless of
+//       MANUAL_PWM_TEST_MODE, and regardless of what chargeController_update()
+//       or testMode_update() just did this loop() pass.
+//
+// HOW:  If already faulted, there's nothing new to check -- skip out
+//       immediately rather than re-reading the sensor and re-printing a
+//       message every single loop() pass. Otherwise, read the battery
+//       sensor directly and compare against the hard limits from Config.h;
+//       if either is exceeded, latch the SAME faulted flag
+//       chargeController_update() uses, so chargeController_isFaulted()
+//       reports true and the existing Serial fault display (in the main
+//       .ino) picks it up automatically -- no separate fault-reporting path
+//       needed.
+//
+// WHY:  See ChargeController.h -- this exists specifically because manual
+//       test mode has no other protection. Checking the sensor here even
+//       skips sensors_isBatterySensorConnected() -- if the sensor isn't
+//       responding, sensors_readBattery() will return near-zero values that
+//       won't exceed these upper limits anyway, so no special case is
+//       needed here (the sensor-missing case is already handled by
+//       chargeController_update()'s own check, in automatic mode).
+// ---------------------------------------------------------------------------
+
+void chargeController_checkHardLimits() {
+  if (faulted) {
+    return;   // Already faulted -- nothing new to do, avoid spamming Serial every loop() pass
+  }
+
+  PowerReading battery = sensors_readBattery();   // Read directly -- independent of chargeController_update()'s own reading
+
+  if (battery.busVoltage_V > HARD_LIMIT_MAX_VOLTAGE_V || battery.current_A > HARD_LIMIT_MAX_CURRENT_A) {
+    faulted = true;
+    dutyPercent = 0.0;
+    boost_setDutyCycle(0.0);   // Immediately override whatever duty cycle either mode just commanded
+
+    Serial.print(F("FAULT: hard safety limit exceeded (V="));
+    Serial.print(battery.busVoltage_V);
+    Serial.print(F("V, I="));
+    Serial.print(battery.current_A);
+    Serial.println(F("A) -- output disabled."));
+  }
+}
