@@ -248,21 +248,24 @@
 // ---------------------------------------------------------------------------
 // BLOCK 12: display + touch pin assignments
 //
-// WHAT: Mega pin connections for the Hosyond 3.5" ST7796U display and its
+// WHAT: Pin connections for the Hosyond 3.5" ST7796U display and its
 //       FT6336U capacitive touch controller, per the module's own pin
 //       function table (VCC, GND, LCD_CS, LCD_RST, LCD_RS, SDI/MOSI, SCK,
 //       LED, SDO/MISO, CTP_SCL, CTP_RST, CTP_SDA, CTP_INT, SD_CS).
 //
-// HOW:  SDI(MOSI), SCK, and SDO(MISO) are NOT defined here -- on the Mega,
-//       hardware SPI is fixed to pins 51, 52, and 50 respectively, so the
-//       display library uses those automatically rather than us choosing
-//       them. CTP_SDA/CTP_SCL aren't defined here either -- they're the
-//       same physical I2C bus (pins 20/21) that Sensors.cpp already uses
-//       for the INA226s, via the same Wire library. SD_CS isn't used at all
-//       since this project doesn't use the display's microSD slot.
+// HOW:  SDI(MOSI), SCK, and SDO(MISO) are NOT defined here -- the display
+//       library uses the board's default SPI bus automatically. On the Mega
+//       that bus is pins 51, 52, and 50. On the Giga R1 WiFi it is the main
+//       SPI header (CIPO/COPI/SCK at D89/D90/D91), so the display's MOSI,
+//       SCK, and MISO wires move to that header when switching boards.
+//       CTP_SDA/CTP_SCL aren't defined here either -- they're the same I2C
+//       bus (pins 20/21 on both boards) that Sensors.cpp uses for the
+//       INA226s, via the same Wire library. SD_CS isn't used at all since
+//       this project doesn't use the display's microSD slot.
 //       The remaining signals (LCD_CS, LCD_RST, LCD_RS, LED, CTP_RST,
 //       CTP_INT) each need their own free digital pin, chosen here to avoid
-//       colliding with GATE_DRIVE_PIN (11) or the hardware SPI/I2C pins.
+//       colliding with GATE_DRIVE_PIN (11) or the SPI/I2C pins. On the Giga,
+//       pins 8 and 9 are the second I2C bus, which this project doesn't use.
 //
 // WHY:  Named here (not hardcoded in a Display.cpp file) for the same
 //       reason as every other pin constant in this project -- one place to
@@ -273,7 +276,7 @@
 #define LCD_RS_PIN    8    // AKA "DC" (data/command select) in most display libraries
 #define LCD_LED_PIN   7    // Backlight; PWM-capable pin in case dimming is added later
 #define TOUCH_RST_PIN 6
-#define TOUCH_INT_PIN 3    // Interrupt-capable pin on the Mega
+#define TOUCH_INT_PIN 3    // Interrupt-capable pin
 
 // ---------------------------------------------------------------------------
 // BLOCK 18: display refresh interval

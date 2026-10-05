@@ -15,7 +15,7 @@ These procedures walk through verifying the firmware and hardware on the bench, 
 
 ## Equipment
 
-- Arduino Mega 2560 with the firmware uploaded
+- Arduino GIGA R1 WiFi with the firmware uploaded (the Mega 2560 is no longer the target board)
 - USB cable and laptop running the Arduino IDE Serial Monitor (9600 baud)
 - Digital multimeter (voltage and current/DC mA range)
 - Oscilloscope with at least two channels, and a 10× probe

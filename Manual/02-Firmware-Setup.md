@@ -15,7 +15,7 @@ Install these via **Sketch → Include Library → Manage Libraries** in the Ard
 
 ## 2.2 Board Selection
 
-In the Arduino IDE: **Tools → Board → Arduino AVR Boards → Arduino Mega or Mega 2560**, then **Tools → Processor → ATmega2560 (Mega 2560)**.
+In the Arduino IDE: install **Arduino Mbed OS Giga Boards** from Boards Manager, then select **Tools → Board → Arduino GIGA R1 WiFi**. The old Mega 2560 setup (ATmega2560 processor) no longer applies.
 
 ## 2.3 Project Structure
 
@@ -26,7 +26,7 @@ The sketch is modular — each file has one responsibility:
 | `UWBG_Power_Converter.ino` | Top-level `setup()`/`loop()` only — calls into modules |
 | `Config.h` | All pin numbers, I2C addresses, and tuning constants in one place |
 | `Sensors.h` / `.cpp` | INA226 sensor init and reading (solar, wind, battery) |
-| `BoostConverter.h` / `.cpp` | Timer1 hardware PWM generation for the gate drive |
+| `BoostConverter.h` / `.cpp` | Gate-drive PWM generation. **Still the Mega's Timer1 code; not yet ported to the Giga.** |
 | `ChargeController.h` / `.cpp` | CC/CV charging algorithm and fault detection |
 | `TestMode.h` / `.cpp` | Manual duty-cycle override for bench testing |
 | `Display.h` / `.cpp` | Display and touch controller |
@@ -35,7 +35,7 @@ All `.h`/`.cpp` files must remain in the same folder as `UWBG_Power_Converter.in
 
 ## 2.4 Uploading
 
-1. Connect the Mega via USB
+1. Connect the Giga via USB (use the USB-C port)
 2. Select the correct **Tools → Port**
 3. Click **Upload**
 4. Once uploaded, open **Tools → Serial Monitor**, set baud rate to **9600**

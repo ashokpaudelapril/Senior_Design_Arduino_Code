@@ -40,11 +40,21 @@ Record every run here, including failures and blocked tests. One row per test ru
 | | 05 | CV phase voltage | | ≤14.6 V | | |
 | | 05 | Efficiency vs hand calc | | ±3 points | | |
 
+## Giga R1 WiFi PWM Results (board swap from Mega 2560)
+
+| Date | Test | Measured | Expected | PASS / FAIL / BLOCKED | Notes |
+|---|---|---|---|---|---|
+| 2026-10-05 | Frequency, `PWM_Giga_Test` on pin 11 | 100.01 kHz (IMG_8996), 100.02 kHz (IMG_8997), period 10.00 µs | 100 kHz | PASS | Scope captures in project folder |
+| 2026-10-05 | Duty at typed value (unknown) | 30.01% (IMG_8996, high 3.00 µs) | Unknown | BLOCKED | Typed value for this capture not recorded |
+| 2026-10-05 | Duty at typed value (unknown) | 10.00% (IMG_8997, high 1.00 µs) | Unknown | BLOCKED | Typed value for this capture not recorded |
+| | Duty at 26, 27, 28 | | Distinct steps | BLOCKED | Not yet measured. High times fall on whole µs, which suggests 10% steps at this period. Needs confirmation before porting `BoostConverter` |
+
 ## Issues Found
 
 | Date | Issue | Cause (if known) | Fix | Retested? |
 |---|---|---|---|---|
-| | | | | |
+| 2026-10-05 | Mega 2560 would not upload: USB dropped and timeouts, even with a minimal sketch | Not determined. Board swapped to Giga R1 WiFi | Using Giga instead | |
+| 2026-10-05 | Giga compile: `TCCR1A`, `ICR1` and related Timer1 registers not declared | Mega-only register code in `BoostConverter.cpp` | Port required once PWM resolution is confirmed | |
 
 ## Changes Made to Firmware or Config During Testing
 

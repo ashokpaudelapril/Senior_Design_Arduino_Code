@@ -86,7 +86,7 @@ Goal: duty pinned at 80% for 3 s without reaching the 1.0 A CC target triggers t
 ## 4.6 Reset Clears Fault
 
 1. Remove any test wiring that caused the fault, and confirm the supply is off or at a safe level.
-2. Press the Mega reset button, or power-cycle.
+2. Press the Giga reset button, or power-cycle.
 3. Expected: the startup messages print, and the Battery line has no `| FAULT`.
 
 ## 4.7 Results

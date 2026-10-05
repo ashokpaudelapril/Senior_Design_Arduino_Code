@@ -2,11 +2,11 @@
 
 This verifies the 100 kHz gate-drive signal and that typed duty-cycle values produce the expected output. Use **manual test mode** (`MANUAL_PWM_TEST_MODE = true` in `Config.h`).
 
-**Do not connect the GaN switch or the TC4427 gate-driver output for this test unless you've confirmed the scope reading first.** Verify the PWM signal at the Mega pin alone, then connect the gate driver.
+**Do not connect the GaN switch or the TC4427 gate-driver output for this test unless you've confirmed the scope reading first.** Verify the PWM signal at the board pin alone, then connect the gate driver.
 
 ## 3.1 Setup
 
-1. Connect the scope probe (10× setting) to **pin 11**, and the ground clip to a Mega **GND** pin.
+1. Connect the scope probe (10× setting) to **pin 11**, and the ground clip to a **GND** pin. Don't use pin 10 for ground.
 2. Set the scope: 20 µs/div time base, 2 V/div, trigger on rising edge of channel 1.
 3. Confirm the Serial Monitor shows `MANUAL PWM TEST MODE` and that you can type a value and get `Manual duty cycle set to:`.
 

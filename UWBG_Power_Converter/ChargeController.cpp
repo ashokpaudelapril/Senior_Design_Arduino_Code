@@ -33,6 +33,7 @@
 //       changing anything outside this file.
 // ---------------------------------------------------------------------------
 
+#include <Arduino.h>
 #include "ChargeController.h"
 #include "BoostConverter.h"
 #include "Sensors.h"

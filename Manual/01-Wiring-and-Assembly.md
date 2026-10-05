@@ -1,12 +1,14 @@
 # 1. Wiring and Assembly
 
-All pin numbers below refer to the **Arduino Mega 2560**, and all come directly from `Config.h` — if you rewire something, update `Config.h` to match, not just this document.
+All pin numbers below refer to the **Arduino GIGA R1 WiFi**, and all come directly from `Config.h` — if you rewire something, update `Config.h` to match, not just this document.
+
+> **Board change:** the project was originally written for the Arduino Mega 2560. The Giga R1 WiFi is now the target board. The pin numbers for signals on digital pins are the same, but the display's SPI wires move to the Giga's main SPI header (see §1.3). The gate-drive PWM code is not yet ported; see §1.2.
 
 ## 1.1 I2C Sensor Bus (INA226 × 4, + 1 placeholder)
 
-All INA226 power monitors share the Mega's single I2C bus:
+All INA226 power monitors share the Giga's I2C bus:
 
-| Signal | Mega Pin |
+| Signal | Giga Pin |
 |---|---|
 | SDA | 20 |
 | SCL | 21 |
@@ -27,23 +29,23 @@ All three sensors use a **0.010 Ω shunt resistor** (the CJMCU-226 board's onboa
 
 ## 1.2 Boost Converter Gate Drive
 
-| Signal | Mega Pin | Notes |
+| Signal | Giga Pin | Notes |
 |---|---|---|
-| Gate drive PWM (to TC4427 driver input) | 11 | Timer1 / OC1A — outputs ~100kHz hardware PWM |
+| Gate drive PWM (to TC4427 driver input) | 11 | Also the SPI5 COPI pin, so keep that SPI bus unused. 100 kHz frequency confirmed on the scope. Duty-step resolution still open. |
 
-Pin 11 was specifically chosen because it's a 16-bit timer pin, needed to generate the real ~100kHz switching frequency (see `BoostConverter.cpp`).
+**Status:** the Giga's frequency is confirmed at 100 kHz, but the `BoostConverter.cpp` port is blocked until the duty-step readings are in. The current file still uses Mega Timer1 registers and will not compile on the Giga.
 
 ## 1.3 Display and Touch (Hosyond 3.5" ST7796U / FT6336U)
 
-| Signal | Mega Pin | Notes |
+| Signal | Giga Pin | Notes |
 |---|---|---|
 | LCD_CS | 10 | Display chip-select |
 | LCD_RST | 9 | Display reset |
 | LCD_RS (DC) | 8 | Display data/command select |
 | LED | 7 | Backlight (currently always-on; PWM-capable for future dimming) |
-| SDI (MOSI) | 51 | Hardware SPI — fixed on Mega, not a firmware choice |
-| SCK | 52 | Hardware SPI — fixed on Mega |
-| SDO (MISO) | 50 | Hardware SPI — fixed on Mega |
+| SDI (MOSI) | D90 (COPI) | Giga main SPI header — fixed by the board, not a firmware choice |
+| SCK | D91 | Giga main SPI header — fixed by the board |
+| SDO (MISO) | D89 (CIPO) | Giga main SPI header — fixed by the board |
 | CTP_SDA | 20 | **Shared** with the INA226 I2C bus above |
 | CTP_SCL | 21 | **Shared** with the INA226 I2C bus above |
 | CTP_RST | 6 | Touch controller reset |
@@ -54,7 +56,7 @@ Pin 11 was specifically chosen because it's a 16-bit timer pin, needed to genera
 
 ## 1.4 Power
 
-- The Arduino Mega, sensors, and display share a common ground with the boost converter's power stage.
+- The Giga, sensors, and display share a common ground with the boost converter's power stage.
 - The wind-drive motor's battery (Hyper Tough 12V Li-ion) is **electrically separate** from the renewable energy path — it only powers the mechanical wind-simulation motor, and should never be wired into the solar/wind/battery sensing or charging circuit.
 
 ## 1.5 Assembly Checklist

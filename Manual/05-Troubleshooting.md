@@ -11,7 +11,7 @@
    - `FAULT: duty cycle pinned at ceiling...` → check that something is actually connected to the boost converter's output (battery or load) — an open circuit is the expected trigger for this fault — **automatic mode only**
    - `FAULT: hard safety limit exceeded...` → voltage went above 15.0V or current above 1.5A. **Can happen in either mode** — in manual mode, this usually means the duty cycle you typed was too high for the current input conditions; try a lower value after resetting
 2. Fix the underlying issue
-3. Press the Mega's reset button, or power-cycle the board — this re-runs `setup()`, which calls `chargeController_init()` and clears the fault (this clears the fault regardless of which of the three checks tripped it, since they all share one fault flag)
+3. Press the Giga's reset button, or power-cycle the board — this re-runs `setup()`, which calls `chargeController_init()` and clears the fault (this clears the fault regardless of which of the three checks tripped it, since they all share one fault flag)
 
 ## 5.2 Sensor Readings Look Like 0.00 V / 0.00 A
 
@@ -27,9 +27,9 @@
 
 ## 5.3 PWM Signal Looks Wrong on the Oscilloscope
 
-**Not ~100kHz:** Confirm you're probing pin 11. Confirm `Config.h` still has `PWM_FREQUENCY_HZ` set to `100000UL` and hasn't been accidentally edited.
+**Not ~100kHz:** Confirm you're probing pin 11. On the Giga, the 100 kHz frequency has been confirmed with `PWM_Giga_Test`, but the main firmware's `BoostConverter.cpp` is still the Mega's Timer1 code, so it will not produce the same output until ported.
 
-**Duty cycle doesn't seem to move smoothly:** This is expected to some degree — at 100kHz, Timer1 only has ~160 discrete duty-cycle steps (~0.625% resolution each), coarser than typical `analogWrite()` resolution. Small requested changes (e.g. the automatic mode's 0.5% step size) can sometimes land on the same actual step and produce no visible change on a given tick — this is a hardware resolution tradeoff, not a bug.
+**Duty cycle doesn't seem to move smoothly:** The Mega's Timer1 has ~160 duty steps (~0.625% each) at 100 kHz. On the Giga, two readings suggest 10% steps at this frequency, which is still unconfirmed (see the Bench Tests log). Small requested changes (e.g. the automatic mode's 0.5% step size) can sometimes land on the same actual step and produce no visible change on a given tick — this is a hardware resolution tradeoff, not a bug.
 
 **No signal at all:** Confirm `boost_init()` actually ran (check for it being called in `setup()`), and that you're not in a latched fault state forcing 0% duty (0% duty may still show a signal at 0V constant, not "no signal" — if you see a flat line at 0V with no switching, that's 0% duty working correctly, not a failure).
 

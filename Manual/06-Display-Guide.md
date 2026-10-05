@@ -50,7 +50,7 @@ The Status tab doesn't say which fault occurred. For the specific reason, check 
 | Colors look wrong (e.g. red and blue swapped) | Panel color order | Add `tft.invertDisplay(true);` after `tft.begin();` in `Display.cpp`, per user reports on this panel |
 | Tapping a tab does nothing | Touch controller not responding, or tap zones off | Check CTP_SDA/SCL (pins 20/21) and CTP_RST/INT (pins 6/3). If the tab is wrong, touch coordinates may need flipping in `display_handleTouch()` |
 | Tapping opens the wrong tab | Touch x-axis is mirrored or swapped for landscape | Adjust the coordinate mapping in `display_handleTouch()` |
-| Numbers stop updating | Serial output still works but the screen doesn't, or the board is stuck | Check the Serial Monitor. If it updates there, check the display SPI wiring (pins 8, 10, 50–52) |
+| Numbers stop updating | Serial output still works but the screen doesn't, or the board is stuck | Check the Serial Monitor. If it updates there, check the display SPI wiring (control pins 8, 9, 10; SPI on the Giga's main header D89–D91) |
 | Text overlaps or is cut off | Panel orientation differs | Change `tft.setRotation(1)` to 0–3 in `Display.cpp` |
 
 If a fix changes the code, update this section and the bench test log.

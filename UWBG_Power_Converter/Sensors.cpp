@@ -31,7 +31,7 @@ INA226_WE inaCommonBus = INA226_WE(INA226_COMMONBUS_ADDR);  // Sensor object bou
 INA226_WE inaLoad      = INA226_WE(INA226_LOAD_ADDR);       // Sensor object bound to the load sensor's I2C address (PLACEHOLDER -- see Config.h)
 
 void sensors_init() {
-  Wire.begin();   // Join I2C bus as controller (Mega: SDA=pin20, SCL=pin21)
+  Wire.begin();   // Join I2C bus as controller (SDA=pin20, SCL=pin21 on both Mega and Giga)
 
   inaSolar.init();                                              // Reset/configure the solar INA226 chip over I2C
   inaSolar.setResistorRange(INA226_SHUNT_OHMS, INA226_MAX_AMPS); // Tell the library our shunt value + expected max current
