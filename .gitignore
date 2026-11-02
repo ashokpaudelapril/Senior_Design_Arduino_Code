@@ -1,1 +1,15 @@
 Adafruit_ST7796S_kbv-master.zip
+/.metadata/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# MCUXpresso IDE auto-generated support files
+.mcuxpressoide_packages_support/
+
+# Scratch/upload screenshots, not organized documentation
+119675aa-6bd2-44ce-bbe6-181c785ca9e0.jpg.jpeg
+b342ac14-24e9-4d91-a7b0-78d03b276385.jpg.jpeg
+b4a2053c-12f9-4fe8-a75c-7f126503de53.jpg.jpeg
+IMG_0975.heic

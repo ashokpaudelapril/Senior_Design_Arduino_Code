@@ -50,6 +50,23 @@ float chargeController_getDutyCycle();
 bool chargeController_isFaulted();
 
 // ---------------------------------------------------------------------------
+// BLOCK 20: fault reason for the display
+//
+// WHAT: chargeController_getFaultReason() returns a short, human-readable
+//       string describing WHY the controller faulted -- e.g. "Battery
+//       sensor not responding" -- or an empty string ("") if nothing has
+//       faulted.
+//
+// WHY:  chargeController_isFaulted() only says yes/no. The Serial Monitor
+//       prints the specific reason at the moment a fault trips, but that
+//       message scrolls away and isn't visible on the display. Someone
+//       looking only at the screen (no laptop attached) needs to see WHY,
+//       not just THAT, the system stopped.
+// ---------------------------------------------------------------------------
+
+const char* chargeController_getFaultReason();
+
+// ---------------------------------------------------------------------------
 // BLOCK 16: hard safety cutoff, independent of operating mode
 //
 // WHAT: chargeController_checkHardLimits() reads the battery sensor and

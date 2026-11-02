@@ -73,7 +73,7 @@ The Serial `Efficiency:` line reports In (common bus power), Out (battery power)
 If the duty cycle oscillates or the battery voltage overshoots:
 
 - The step size (`CHARGE_DUTY_STEP_PERCENT`, 0.5%) and control rate (`CONTROL_LOOP_INTERVAL_MS`, 50 ms) are untested guesses. Record what you see and propose changes in the log. Don't tune them mid-test; change one value, re-upload, and repeat the run.
-- The achieved duty steps in 0.625% increments (see [03-PWM-Verification.md](03-PWM-Verification.md) §3.2). A 0.5% step sometimes produces no visible change, which can look like the controller is ignoring feedback. That's expected.
+- The achieved duty steps in ~0.042% increments on the Giga (see [03-PWM-Verification.md](03-PWM-Verification.md) §3.2) — fine enough that the 0.5% control step size should always produce a visible change, unlike the coarser Mega design this project started with.
 
 ## 5.6 Results
 

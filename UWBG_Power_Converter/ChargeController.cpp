@@ -37,15 +37,18 @@
 #include "ChargeController.h"
 #include "BoostConverter.h"
 #include "Sensors.h"
+#include "TemperatureSensors.h"
 #include "Config.h"
 
 static float dutyPercent = 0.0;          // Commanded duty cycle, remembered between update() calls
 static bool  faulted = false;            // Once true, stays true until chargeController_init() runs again (e.g. reset)
 static unsigned long timeAtMaxDuty = 0;  // millis() timestamp when we FIRST got pinned at the ceiling below target; 0 = not currently pinned
+static const char* faultReason = "";     // Short human-readable reason for the latched fault, for the display
 
 void chargeController_init() {
   dutyPercent  = 0.0;   // Start at 0% -- switch off, same safe default as boost_init()
   faulted      = false; // Clear any previous fault -- this only runs at power-up/reset, so this IS the reset
+  faultReason  = "";    // No fault reason to show until something actually trips
   timeAtMaxDuty = 0;    // Not pinned at the ceiling yet
 
   boost_setDutyCycle(dutyPercent);   // Push that starting value out to the hardware immediately
@@ -88,6 +91,7 @@ void chargeController_update() {
 
   if (!sensors_isBatterySensorConnected()) {
     faulted = true;
+    faultReason = "Battery sensor not responding";   // Shown on the display's Status tab
     dutyPercent = 0.0;
     boost_setDutyCycle(0.0);
     Serial.println(F("FAULT: battery sensor not responding -- output disabled."));
@@ -117,6 +121,7 @@ void chargeController_update() {
       timeAtMaxDuty = millis();   // First time we've seen this -- start the clock
     } else if (millis() - timeAtMaxDuty >= CHARGE_FAULT_TIMEOUT_MS) {
       faulted = true;
+      faultReason = "Possible open circuit (no battery/load)";   // Shown on the display's Status tab
       dutyPercent = 0.0;
       boost_setDutyCycle(0.0);
       Serial.println(F("FAULT: duty cycle pinned at ceiling without reaching CC target -- possible open circuit. Output disabled."));
@@ -135,6 +140,10 @@ float chargeController_getDutyCycle() {
 
 bool chargeController_isFaulted() {
   return faulted;   // Report whether the controller has latched into its fault state
+}
+
+const char* chargeController_getFaultReason() {
+  return faultReason;   // Empty string ("") if no fault, a short reason string once faulted
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +181,7 @@ void chargeController_checkHardLimits() {
 
   if (battery.busVoltage_V > HARD_LIMIT_MAX_VOLTAGE_V || battery.current_A > HARD_LIMIT_MAX_CURRENT_A) {
     faulted = true;
+    faultReason = "Hard voltage/current limit exceeded";   // Shown on the display's Status tab
     dutyPercent = 0.0;
     boost_setDutyCycle(0.0);   // Immediately override whatever duty cycle either mode just commanded
 
@@ -180,5 +190,40 @@ void chargeController_checkHardLimits() {
     Serial.print(F("V, I="));
     Serial.print(battery.current_A);
     Serial.println(F("A) -- output disabled."));
+    return;
+  }
+
+  // --- Thermal protection (Block 22-24): GaN switch and inductor overtemperature ---
+  //
+  // WHAT: Checks the latest cached temperature reading (never blocks -- see
+  //       TemperatureSensors.h) against the limits in Config.h.
+  //
+  // WHY NO FAULT WHEN "invalid": unlike the battery sensor, these probes are
+  //       a SECONDARY protective layer, not something the control algorithm
+  //       depends on to function. At power-up, before the first ~800ms
+  //       conversion cycle completes, latestReading.valid is false -- and
+  //       that's also what you'd see if the probes simply aren't wired up
+  //       yet (e.g. during a bench PWM-only test with no temperature
+  //       hardware connected at all). Treating "no temperature data yet"
+  //       as an immediate fault would make bench testing without the probes
+  //       impossible, for a layer of protection that's additive on top of
+  //       the voltage/current limits above, not a replacement for them.
+  //       The trade-off: if the probes are never wired up, there's silently
+  //       no thermal protection -- this is a deliberate choice, not an
+  //       oversight, and worth knowing about.
+  TemperatureReading temps = temperatureSensors_getLatest();
+
+  if (temps.valid && (temps.ganSwitchTemp_C > HARD_LIMIT_MAX_GAN_TEMP_C ||
+                       temps.inductorTemp_C  > HARD_LIMIT_MAX_INDUCTOR_TEMP_C)) {
+    faulted = true;
+    faultReason = "Overtemperature (GaN switch or inductor)";   // Shown on the display's Status tab
+    dutyPercent = 0.0;
+    boost_setDutyCycle(0.0);
+
+    Serial.print(F("FAULT: overtemperature (GaN="));
+    Serial.print(temps.ganSwitchTemp_C);
+    Serial.print(F("C, Inductor="));
+    Serial.print(temps.inductorTemp_C);
+    Serial.println(F("C) -- output disabled."));
   }
 }

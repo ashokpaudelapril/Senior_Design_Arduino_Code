@@ -27,9 +27,9 @@
 
 ## 5.3 PWM Signal Looks Wrong on the Oscilloscope
 
-**Not ~100kHz:** Confirm you're probing pin 11. On the Giga, the 100 kHz frequency has been confirmed with `PWM_Giga_Test`, but the main firmware's `BoostConverter.cpp` is still the Mega's Timer1 code, so it will not produce the same output until ported.
+**Not ~100kHz:** Confirm you're probing pin 11. `BoostConverter.cpp` drives TIM8 Channel 2 directly via STM32 HAL at 240MHz with a 2400-tick period, which works out to exactly 100kHz. If the frequency is off, check that `TIM8_CLOCK_HZ` in `Config.h` still reads `240000000UL` — that value was measured on real hardware, not assumed, so don't "correct" it without re-measuring (see `HAL_Access_Test.ino`).
 
-**Duty cycle doesn't seem to move smoothly:** The Mega's Timer1 has ~160 duty steps (~0.625% each) at 100 kHz. On the Giga, two readings suggest 10% steps at this frequency, which is still unconfirmed (see the Bench Tests log). Small requested changes (e.g. the automatic mode's 0.5% step size) can sometimes land on the same actual step and produce no visible change on a given tick — this is a hardware resolution tradeoff, not a bug.
+**Duty cycle doesn't seem to move smoothly:** This should no longer happen. Mbed's standard `PwmOut` API (tried first) was confirmed by scope measurement to only give ~10% duty steps at 100kHz, regardless of entry point — that's why `BoostConverter.cpp` bypasses it and drives TIM8 directly instead, giving 2400 steps per period (~0.042% resolution). If you still see coarse, jumpy duty cycle behavior, that's a regression worth investigating, not expected behavior.
 
 **No signal at all:** Confirm `boost_init()` actually ran (check for it being called in `setup()`), and that you're not in a latched fault state forcing 0% duty (0% duty may still show a signal at 0V constant, not "no signal" — if you see a flat line at 0V with no switching, that's 0% duty working correctly, not a failure).
 

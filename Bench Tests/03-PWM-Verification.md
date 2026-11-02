@@ -12,19 +12,17 @@ This verifies the 100 kHz gate-drive signal and that typed duty-cycle values pro
 
 ## 3.2 Expected Duty Cycles
 
-Timer1 runs with 160 steps per period (TOP = 159), so the achieved duty is the integer step below, **not the exact number you typed**. The firmware computes it as `floor(D/100 × 159) / 160`.
+`BoostConverter.cpp` drives STM32's TIM8 directly at a measured 240MHz kernel clock, with 2400 steps per period (~0.042% resolution per step — about 15× finer than the Mega's original Timer1 design). At this resolution, the achieved duty matches the typed value almost exactly for any reasonable test value — unlike the Mega, where the 160-step resolution visibly rounded values down.
 
 | You type | Expected output duty | Expected period | Expected frequency |
 |---|---|---|---|
-| 0 | ~0% (see note) | 10 µs | 100 kHz |
-| 25 | 24.4% | 10 µs | 100 kHz |
-| 50 | 49.4% | 10 µs | 100 kHz |
-| 80 | 79.4% | 10 µs | 100 kHz |
-| 100 | 99.4% | 10 µs | 100 kHz |
+| 0 | 0% | 10 µs | 100 kHz |
+| 25 | 25.0% | 10 µs | 100 kHz |
+| 50 | 50.0% | 10 µs | 100 kHz |
+| 80 | 80.0% | 10 µs | 100 kHz |
+| 100 | 100.0% | 10 µs | 100 kHz |
 
-Note at 0%: the output should be low except for a very short pulse at the start of the period, on the order of tens of nanoseconds. Treat this as 0% for test purposes.
-
-Note at 100%: the output reaches 159/160 of the period, not 100%. The remaining 0.6% is the timer's structure, not a bug.
+Note at 100%: unlike the Mega version (which topped out at 99.4% due to its timer's structure), TIM8's compare value at 100% exceeds its count range entirely, so the output is genuinely 100% with no gap.
 
 **Proposed tolerance:** frequency ±1% (99–101 kHz); duty within ±0.5 percentage points of the expected value.
 
@@ -39,15 +37,17 @@ For each row in §3.2:
 
 | Typed | Measured frequency (kHz) | Measured duty (%) | Expected duty (%) | PASS/FAIL |
 |---|---|---|---|---|
-| 0 | | | ~0 | |
-| 25 | | | 24.4 | |
-| 50 | | | 49.4 | |
-| 80 | | | 79.4 | |
-| 100 | | | 99.4 | |
+| 0 | | | 0 | |
+| 25 | | | 25.0 | |
+| 50 | | | 50.0 | |
+| 80 | | | 80.0 | |
+| 100 | | | 100.0 | |
 
 ## 3.4 Resolution Check
 
-Type `25.5`, then `25.6`, then `25.7`. These should land on the same or adjacent steps (each step is 0.625%), so you should see the same or near-identical duty. This confirms the coarse resolution is real hardware behavior and not a firmware bug.
+This test now confirms **fine** resolution, the opposite of what it checked on the Mega. Type `35`, then `55`, then `58` — these specific values were chosen because they previously exposed the old Mbed `PwmOut` rounding (which snapped everything to multiples of 10%). You should see each one land at its own correct value, not rounded to a nearby 10% mark.
+
+Note: at 0.042% per step, two values only 0.1% apart (e.g. `35.0` vs `35.1`) may *not* look visibly different on the scope — the real tick-level difference is only a few nanoseconds of pulse width, likely below what the scope's display or your eye can resolve at normal time scales. That's expected and fine; it doesn't mean the resolution isn't there, just that this scope can't visually confirm differences that small.
 
 ## 3.5 Clamp Check
 
@@ -55,8 +55,8 @@ Type `-10` and then `150`.
 
 | Typed | Expected behavior | Result |
 |---|---|---|
-| -10 | Clamped to 0%, output ~0% | |
-| 150 | Clamped to 100% (output 99.4%) | |
+| -10 | Clamped to 0%, output 0% | |
+| 150 | Clamped to 100%, output 100% | |
 
 ## 3.6 Caution: Manual Mode Has No 80% Ceiling
 
@@ -66,4 +66,4 @@ In automatic mode, duty cycle never exceeds 80%. Manual mode allows 0–100%. Do
 
 **Section result:** PASS / FAIL / BLOCKED
 
-If the frequency is wrong (not ~100 kHz), check that `PWM_FREQUENCY_HZ` is `100000UL` in `Config.h` and that the board was re-uploaded after any edit. If the duty steps don't match the table, check the typed value is the one echoed.
+If the frequency is wrong (not ~100 kHz), check that `TIM8_CLOCK_HZ` in `Config.h` still reads `240000000UL` and that the board was re-uploaded after any edit. That value was measured on real hardware (see `HAL_Access_Test.ino`), not calculated from a datasheet assumption — if your specific board reports a different APB2 clock or prescaler setting, this constant would need updating to match. If the duty steps don't match the table, check the typed value is the one echoed.

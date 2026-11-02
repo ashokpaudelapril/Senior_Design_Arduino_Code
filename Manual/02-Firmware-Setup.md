@@ -10,6 +10,8 @@ Install these via **Sketch → Include Library → Manage Libraries** in the Ard
 | `Adafruit_ST7796S_kbv` | Driving the display | Confirmed working on Arduino Mega2560 by a verified buyer review of this exact panel — the bundled Hosyond demo library is not used (multiple reviewers reported it buggy/outdated) |
 | `Adafruit GFX Library` | Required dependency of `Adafruit_ST7796S_kbv` | Provides the drawing primitives (text, shapes) the display driver builds on |
 | `Arduino-FT6336U` (by aselectroworks, GitHub) | Reading the capacitive touch controller | May need manual ZIP install if not in the Library Manager index — search GitHub `aselectroworks/Arduino-FT6336U` |
+| `OneWire` | 1-Wire bus protocol for the DS18B20 temperature probes | Standard, well-maintained library |
+| `DallasTemperature` | DS18B20-specific reading on top of `OneWire` | Depends on `OneWire` being installed |
 
 `Wire.h` and `SPI.h` are built into the Arduino core and don't need separate installation.
 
@@ -26,10 +28,14 @@ The sketch is modular — each file has one responsibility:
 | `UWBG_Power_Converter.ino` | Top-level `setup()`/`loop()` only — calls into modules |
 | `Config.h` | All pin numbers, I2C addresses, and tuning constants in one place |
 | `Sensors.h` / `.cpp` | INA226 sensor init and reading (solar, wind, battery) |
-| `BoostConverter.h` / `.cpp` | Gate-drive PWM generation. **Still the Mega's Timer1 code; not yet ported to the Giga.** |
+| `BoostConverter.h` / `.cpp` | Gate-drive PWM generation. Drives STM32 TIM8 Channel 2 directly via HAL (ported from the Mega's AVR Timer1 code). |
 | `ChargeController.h` / `.cpp` | CC/CV charging algorithm and fault detection |
 | `TestMode.h` / `.cpp` | Manual duty-cycle override for bench testing |
 | `Display.h` / `.cpp` | Display and touch controller |
+| `TemperatureSensors.h` / `.cpp` | GaN switch / inductor DS18B20 probes, over 1-Wire |
+| `Efficiency.h` / `.cpp` | Power-in vs. power-out efficiency calculation |
+| `Relays.h` / `.cpp` | Mechanism: drives the 6 relay-module channels (solar, wind, 4 demo loads) on/off, hiding the active-low electrical detail |
+| `LoadControl.h` / `.cpp` | Policy: tracks what the touchscreen's Relays tab asked for, and applies the automatic "enough power available" check before actually energizing a load relay |
 
 All `.h`/`.cpp` files must remain in the same folder as `UWBG_Power_Converter.ino` — the Arduino IDE compiles everything in the sketch folder together automatically.
 

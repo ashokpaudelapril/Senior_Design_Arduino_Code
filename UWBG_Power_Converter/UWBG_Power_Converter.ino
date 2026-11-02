@@ -15,13 +15,17 @@
 //       startup and every loop, then open the relevant module to see *how*.
 // ---------------------------------------------------------------------------
 
-#include "Config.h"           // Shared pin/calibration constants
-#include "Sensors.h"          // Sensor module (INA226 readings)
-#include "BoostConverter.h"   // Boost converter gate-drive module
-#include "ChargeController.h" // CC/CV control logic module
-#include "TestMode.h"         // Manual duty-cycle override for bench testing
-#include "Display.h"          // Display + touch module
-#include "Efficiency.h"       // Power-in vs. power-out efficiency calculation
+#include "Config.h"             // Shared pin/calibration constants
+#include "Sensors.h"            // Sensor module (INA226 readings)
+#include "BoostConverter.h"     // Boost converter gate-drive module
+#include "ChargeController.h"   // CC/CV control logic module
+#include "TestMode.h"           // Manual duty-cycle override for bench testing
+#include "Display.h"            // Display + touch module
+#include "Efficiency.h"         // Power-in vs. power-out efficiency calculation
+#include "TemperatureSensors.h" // GaN switch / inductor DS18B20 probes
+#include "Relays.h"             // Solar/wind/load relay switching
+#include "LoadControl.h"        // Operator intent + automatic power-available check for the relays above
+#include "WebDashboard.h"       // Read-only status page served over the Giga's own WiFi
 
 void setup() {
   Serial.begin(9600);       // Start Serial at 9600 baud for debug output over USB
@@ -29,6 +33,10 @@ void setup() {
   boost_init();             // Gate drive starts at 0% duty -- switch off
   chargeController_init();  // Reset the CC/CV controller's duty cycle state to 0%
   display_init();           // Bring up the ST7796U display + FT6336U touch controller
+  temperatureSensors_init(); // Bring up the 1-Wire bus for the GaN switch + inductor probes
+  relays_init();             // Set up the 6 relay pins as outputs, all starting OFF
+  loadControl_init();        // Operator intent for all 6 relays starts at OFF too
+  webDashboard_init();        // Join WiFi and start the read-only status page (skips itself cleanly if WiFi fails)
 
   if (MANUAL_PWM_TEST_MODE) {   // Print usage instructions only when the test mode is actually active
     Serial.println(F("MANUAL PWM TEST MODE: type a duty cycle 0-100 and press Enter."));
@@ -163,6 +171,33 @@ void printLoadReading() {
 }
 
 // ---------------------------------------------------------------------------
+// BLOCK 22-24: printing temperature readings in loop()
+//
+// WHAT: Prints the GaN switch and inductor probe temperatures.
+//
+// WHY:  Lets us verify both DS18B20 probes independently once wired up --
+//       and, same as every other sensor here, lets us catch a wiring
+//       mix-up (GaN probe actually reporting the inductor's temperature,
+//       or vice versa) before trusting it for the thermal safety check in
+//       ChargeController.
+// ---------------------------------------------------------------------------
+
+void printTemperatureReading() {
+  TemperatureReading temps = temperatureSensors_getLatest();   // Cached value -- never blocks
+
+  Serial.print(F("Temp: "));
+  if (temps.valid) {
+    Serial.print(F("GaN="));
+    Serial.print(temps.ganSwitchTemp_C);
+    Serial.print(F("C, Inductor="));
+    Serial.print(temps.inductorTemp_C);
+    Serial.println(F("C"));
+  } else {
+    Serial.println(F("waiting for probes (not ready yet, or not connected)"));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // BLOCK 14: printing efficiency in loop()
 //
 // WHAT: Prints the common DC bus input power, battery output power,
@@ -187,17 +222,23 @@ void printEfficiency() {
 }
 
 // ---------------------------------------------------------------------------
-// BLOCK 18: updating the live display in loop()
+// BLOCK 18 (extended in BLOCK 31): updating the live display and web
+// dashboard in loop()
 //
 // WHAT: Gathers the current values from the sensor, control, and efficiency
-//       modules, and hands them to display_update() to draw.
+//       modules, and hands them to both display_update() (the physical
+//       touchscreen) and webDashboard_update() (the WiFi status page).
 //
 // HOW:  Reads each sensor once, along with the duty cycle, efficiency, and
-//       fault flag, and packs them into a DisplayData struct. The display
-//       module only draws what it receives.
+//       fault flag, and packs them into a DisplayData struct. Both
+//       "displays" draw from the exact same snapshot -- no duplicate
+//       sensor reads, and the touchscreen and web page can never show two
+//       different answers from reading sensors at slightly different
+//       moments.
 //
-// WHY:  Keeps the display free of calculations and sensor code. This
-//       function is the only place that connects the two.
+// WHY:  Keeps both display modules free of calculations and sensor code.
+//       This function is the only place that connects sensors/control to
+//       any display.
 // ---------------------------------------------------------------------------
 
 void updateDisplay() {
@@ -208,8 +249,11 @@ void updateDisplay() {
   data.battery = sensors_readBattery();
   data.dutyPercent = chargeController_getDutyCycle();
   data.efficiencyPercent = efficiency_calculate().efficiencyPercent;
+  data.temps = temperatureSensors_getLatest();
   data.faulted = chargeController_isFaulted();
+  data.faultReason = chargeController_getFaultReason();
   display_update(data);
+  webDashboard_update(data);   // Same snapshot, served to any browser on the network instead of the physical panel
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +318,20 @@ void loop() {
     chargeController_update();      // Read battery sensor, adjust duty cycle one step
   }
 
+  // BLOCK 22-24: advances the temperature probes' non-blocking read cycle. Cheap to call
+  // every loop() pass -- most calls just check a millis() timestamp and return immediately;
+  // it only does real work roughly once a second. Called BEFORE the hard-limit check below
+  // so that check sees the freshest possible cached temperature.
+  temperatureSensors_update();
+
+  // BLOCK 28: re-evaluates the 6 relays every loop() pass -- cheap (a
+  // sensor read already needed elsewhere, a few comparisons, a few
+  // digitalWrite() calls), so no dedicated timer is needed here, unlike
+  // the control loop or display refresh above. This is what actually
+  // turns the solar/wind relays on/off directly, and applies the
+  // automatic power-available check to the 4 load relays.
+  loadControl_update();
+
   // BLOCK 16: hard safety cutoff -- runs every single loop() pass, unconditionally,
   // regardless of which mode is active. Placed AFTER the mode branch above so it
   // always has the final say over duty cycle each pass, overriding either mode
@@ -297,6 +355,7 @@ void loop() {
     printCommonBusReading();    // Take and print a new common DC bus reading
     printBatteryReading();      // Take and print a new battery reading + current duty cycle
     printLoadReading();         // Take and print a new load reading (placeholder -- no buck converter yet)
+    printTemperatureReading();  // Take and print the GaN switch + inductor temperatures
     printEfficiency();          // Take and print combined input/output power + efficiency
   }
 }

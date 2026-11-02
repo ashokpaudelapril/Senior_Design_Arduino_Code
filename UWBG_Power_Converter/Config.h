@@ -111,45 +111,60 @@
 #define SENSOR_PRINT_INTERVAL_MS 1000
 
 // ---------------------------------------------------------------------------
-// BLOCK 5 (upgraded in Block 8): boost converter gate drive pin
+// BLOCK 5 (upgraded in Block 8, ported to Giga in Block 21): boost converter
+// gate drive pin
 //
-// WHAT: The Mega pin that carries the PWM signal into the TC4427 gate
-//       driver, which switches the GaN device.
+// WHAT: The pin that carries the PWM signal into the TC4427 gate driver,
+//       which switches the GaN device.
 //
-// WHY:  Pin 11 is Timer1's OC1A output -- a 16-bit hardware timer. Block 5
-//       used plain analogWrite() here as a placeholder; Block 8 reconfigures
-//       Timer1's registers directly for true ~100kHz output on this SAME
-//       pin, so nothing about the physical wiring changes between the two.
+// WHY:  Pin 11 was originally chosen on the Mega because it's Timer1's OC1A
+//       output -- a 16-bit hardware timer, needed to generate true ~100kHz
+//       PWM. On the Giga, pin 11 (D11) happens to map to TIM8 Channel 2,
+//       also independently suitable for this -- confirmed by direct scope
+//       measurement in Block 21. Nothing about the physical wiring needed
+//       to change when the board did.
 // ---------------------------------------------------------------------------
 #define GATE_DRIVE_PIN 11
 
 // ---------------------------------------------------------------------------
-// BLOCK 8: real hardware-timer PWM frequency
+// BLOCK 21: Giga TIM8 hardware-timer PWM (replaces the Mega's Timer1 code)
 //
-// WHAT: The actual boost-converter switching frequency (per the block
-//       diagram, ~100kHz) and the Timer1 TOP value that produces it.
+// WHAT: The boost-converter switching frequency (~100kHz, per the block
+//       diagram) and the timer tick values that produce it on the Giga's
+//       STM32H7 chip, via TIM8 Channel 2.
 //
-// HOW:  In Fast PWM mode with no prescaling, Timer1 counts up from 0 to
-//       PWM_TOP_VALUE at the Mega's 16MHz clock rate, then resets --that's
-//       one PWM period. So: frequency = F_CPU / (TOP + 1).
-//       Solving for TOP at our target frequency:
-//         TOP = F_CPU / PWM_FREQUENCY_HZ - 1
-//             = 16,000,000 / 100,000 - 1 = 159
-//       F_CPU is defined automatically by the Arduino core (16000000 for
-//       the Mega), so this is computed here rather than hardcoding "159",
-//       in case the target frequency ever changes.
+// HOW:  Unlike the Mega's AVR Timer1 (a simple 16MHz clock with a
+//       straightforward TOP calculation), the Giga's TIM8 clock speed isn't
+//       something to assume -- STM32 timers get a 2x multiplier over their
+//       APB bus clock whenever that bus's prescaler divides by more than 1.
+//       TIM8_CLOCK_HZ below is NOT calculated from a datasheet number; it
+//       was measured directly on real hardware using a small diagnostic
+//       sketch (HAL_RCC_GetPCLK2Freq() read 120MHz, and HAL_RCC_GetClockConfig()
+//       confirmed the APB2 prescaler divides by more than 1, so the x2 rule
+//       applies: 120MHz x 2 = 240MHz actual TIM8 kernel clock).
 //
-// WHY:  This TOP value also sets our duty-cycle resolution: OCR1A can be
-//       any whole number from 0 to PWM_TOP_VALUE, so we get (TOP+1) = 160
-//       possible duty-cycle steps (~0.625% each) -- coarser than the 256
-//       steps analogWrite() gave us, because running a 16-bit timer at a
-//       much higher frequency means fewer clock ticks fit in each period.
-//       This is an inherent trade-off between switching frequency and duty
-//       cycle resolution on this hardware, not a bug -- worth knowing when
-//       interpreting the boost converter's behavior on the scope.
+//       With no prescaling, the timer counts 0..PWM_PERIOD_TICKS-1 and
+//       wraps -- that's one PWM period:
+//         PWM_PERIOD_TICKS = TIM8_CLOCK_HZ / PWM_FREQUENCY_HZ
+//                           = 240,000,000 / 100,000 = 2400
+//
+// WHY:  This was NOT the first thing tried. Mbed's standard PwmOut API
+//       (both write() and pulsewidth()) was tested first, since it's the
+//       normal Arduino-level way to do PWM -- but scope measurement showed
+//       it only produces ~10% duty steps (values like 25-29% all rounded
+//       down to 20%), regardless of which float-based entry point was
+//       used. That meant the limitation was inside Mbed's own PWM
+//       implementation for this timer, not fixable from the sketch side
+//       with the standard API. Configuring TIM8 directly via STM32 HAL
+//       (done in BoostConverter.cpp) was confirmed by scope measurement to
+//       give correct duty cycles at values like 35%, 55%, and 58% -- a
+//       resolution of 1/2400 = ~0.042% per step, far finer than the
+//       0.5% step size ChargeController actually needs.
 // ---------------------------------------------------------------------------
-#define PWM_FREQUENCY_HZ 100000UL
-#define PWM_TOP_VALUE    ((F_CPU / PWM_FREQUENCY_HZ) - 1)
+#define PWM_FREQUENCY_HZ   100000UL
+#define TIM8_CLOCK_HZ      240000000UL                         // Measured, not assumed -- see HOW above
+#define PWM_PERIOD_TICKS   (TIM8_CLOCK_HZ / PWM_FREQUENCY_HZ)  // 2400 ticks per period
+#define PWM_ARR_VALUE      (PWM_PERIOD_TICKS - 1)              // Timer counts 0..ARR, so ARR = period - 1
 
 // ---------------------------------------------------------------------------
 // BLOCK 7: CC/CV charge control targets and tuning
@@ -204,6 +219,73 @@
 // ---------------------------------------------------------------------------
 #define HARD_LIMIT_MAX_VOLTAGE_V 15.0
 #define HARD_LIMIT_MAX_CURRENT_A 1.5
+
+// ---------------------------------------------------------------------------
+// BLOCK 22: temperature sensor pin
+//
+// WHAT: The Giga pin carrying the 1-Wire bus for the two DS18B20
+//       temperature probes (GaN switch and boost inductor).
+//
+// HOW:  DS18B20 uses 1-Wire, not I2C -- unlike the INA226 sensors, both
+//       probes share this ONE pin (plus GND and 3.3V), distinguished by
+//       their own unique factory-burned IDs rather than a configurable
+//       address. A single pull-up resistor (4.7k ohm, included with the
+//       DROK sensor kit) goes between this pin and 3.3V -- NOT 5V, since
+//       the Giga's logic is 3.3V and pulling the line to 5V would
+//       overvoltage the GPIO when a sensor releases it high.
+//
+// WHY:  Pin 2 was chosen because it's free -- not used by any other module
+//       in this project (gate drive is 11; display/touch use 3, 6, 7, 8,
+//       9, 10; I2C is 20/21; SPI is the Giga's fixed hardware pins).
+// ---------------------------------------------------------------------------
+#define TEMP_SENSOR_PIN 2
+
+// ---------------------------------------------------------------------------
+// BLOCK 23: thermal safety limits
+//
+// WHAT: Maximum safe temperatures (Celsius) for the GaN switch and boost
+//       inductor before ChargeController trips a fault, same pattern as
+//       the voltage/current hard limits above.
+//
+// HOW:  These are conservative starting values, NOT taken from a specific
+//       datasheet thermal-derating calculation -- the GaN switch
+//       (TP65H150G4PS) and inductor (TDK SPM10065VT) both have junction/
+//       core ratings well above 85C, but we're measuring board/case
+//       temperature near each part with an external probe, not the actual
+//       junction or core temperature, so a lower trip point gives real
+//       margin against thermal damage. TUNE THESE once you have real bench
+//       data on how hot each part actually runs at normal operating duty
+//       cycles -- the same spirit as CHARGE_DUTY_STEP_PERCENT being an
+//       untested starting guess until proven on hardware.
+//
+// WHY:  This extends chargeController_checkHardLimits() (Block 16) to also
+//       cover thermal faults, using the exact same fault-latch mechanism
+//       and the same "runs in both manual and automatic mode" reasoning --
+//       a person in manual test mode has no other protection against
+//       driving the GaN switch into an overtemperature condition either.
+// ---------------------------------------------------------------------------
+#define HARD_LIMIT_MAX_GAN_TEMP_C       85.0
+#define HARD_LIMIT_MAX_INDUCTOR_TEMP_C  85.0
+
+// ---------------------------------------------------------------------------
+// BLOCK 24: temperature sensor timing
+//
+// WHAT: Timing constants for the DS18B20 non-blocking read cycle.
+//
+// HOW:  TEMP_REQUEST_INTERVAL_MS is how often a new conversion is started.
+//       TEMP_CONVERSION_TIME_MS is how long a DS18B20 needs to finish one
+//       conversion at its default 12-bit resolution -- 750ms is the
+//       datasheet's worst-case figure; waiting slightly longer (800ms)
+//       leaves a small safety margin.
+//
+// WHY:  Temperature changes slowly compared to electrical faults (a GaN
+//       switch doesn't go from cool to dangerous in milliseconds the way
+//       voltage can), so reading once a second is more than fast enough --
+//       no need to push these sensors as hard as the 50ms CC/CV control
+//       loop runs.
+// ---------------------------------------------------------------------------
+#define TEMP_REQUEST_INTERVAL_MS  1000
+#define TEMP_CONVERSION_TIME_MS   800
 
 // ---------------------------------------------------------------------------
 // BLOCK 10: fault detection timeout
@@ -314,5 +396,197 @@
 //       noisy, meaningless ratio.
 // ---------------------------------------------------------------------------
 #define EFFICIENCY_MIN_INPUT_POWER_W 0.1
+
+// ---------------------------------------------------------------------------
+// BLOCK 25: relay control pins (solar / wind / load switching)
+//
+// WHAT: Six digital output pins, each driving one channel of the ELEGOO
+//       8-channel relay module -- these replace what was originally planned
+//       as 6 manually-flipped toggle switches. Instead of a person flipping
+//       a physical switch, Arduino drives these pins HIGH/LOW, and the
+//       relay module's optocoupler + transistor on that channel does the
+//       actual switching of the real circuit.
+//
+// HOW:  Each pin feeds one relay module channel's logic input (the "VCC"
+//       side of the module, NOT "JD-VCC" -- the module's two power rails
+//       are split so the Giga's 3.3V GPIO only ever talks to the
+//       optocoupler, never the 5V relay coil current itself; see
+//       01-Wiring-and-Assembly.md for the full jumper-removal wiring note).
+//       Picked pins 4, 5, 12, 22, 23, 24 -- plain digital pins, no PWM or
+//       hardware-timer requirement, and none of them collide with anything
+//       already in use: gate drive is 11, temp probes are 2, I2C is 20/21,
+//       display/touch use 3, 6, 7, 8, 9, 10, and the display's SPI uses the
+//       Giga's fixed main-header pins (D89-D91).
+//
+// WHY:  Named here, one per switching location, for the same reason as
+//       every other pin constant in this file -- one place to check or
+//       change the wiring plan. The grouping (solar / wind / 4 loads)
+//       matches the final switch-location decision: the original 14-switch
+//       manual-toggle plan (wind drive motor + 4 individual generators +
+//       8 other disconnect points) was replaced by just these 6 Arduino-
+//       controlled points, with everything else (battery disconnect, master
+//       power, etc.) staying a manual physical switch since those are
+//       either bench-test disconnects or things the charge controller needs
+//       to stay connected to function.
+// ---------------------------------------------------------------------------
+#define RELAY_SOLAR_PIN              4    // Solar array -> common bus
+#define RELAY_WIND_PIN               5    // Whole wind subsystem (drive motor + generators) -> common bus
+#define RELAY_LOAD_DATACENTER_PIN    12   // Data center demo load
+#define RELAY_LOAD_EV_PIN            22   // EV charging demo load
+#define RELAY_LOAD_LED_LAMP_PIN      23   // LED lamp demo load
+#define RELAY_LOAD_OTHER_PIN         24   // Other / general demonstration load
+
+// ---------------------------------------------------------------------------
+// BLOCK 26: relay logic sense
+//
+// WHAT: Whether this specific relay module energizes its relay (closes the
+//       real-world circuit) on a HIGH signal or a LOW signal.
+//
+// HOW:  Most of these common "blue board" opto-isolated relay modules are
+//       ACTIVE-LOW by default -- pulling the channel's input LOW turns the
+//       relay ON, HIGH turns it OFF -- which is the opposite of what most
+//       people assume at a glance. CONFIRM THIS ON THE BENCH once the
+//       module arrives (listen/watch for the relay's click while toggling
+//       the pin both ways) before trusting it -- don't just assume the
+//       datasheet default matches your specific board revision.
+//
+// WHY:  Keeping this as one named constant, used everywhere a relay is
+//       switched, means if the bench test shows the opposite sense, fixing
+//       it is a one-line change here instead of hunting through every
+//       relay-driving call to flip its logic individually.
+// ---------------------------------------------------------------------------
+#define RELAY_ACTIVE_LOW true   // true = LOW turns the relay ON; verify on the bench
+
+// ---------------------------------------------------------------------------
+// BLOCK 27: load-shedding power threshold
+//
+// WHAT: The minimum battery/charge-output power (in watts) required before
+//       any of the 4 demo load relays (data center, EV, LED lamp, other)
+//       is allowed to actually energize, even if its touch button says ON.
+//
+// HOW:  Checked against sensors_readBattery().power_W -- the real, already-
+//       wired sensor that represents power actually being delivered by the
+//       solar+wind+boost-converter chain right now. This is a placeholder
+//       choice, same spirit as CHARGE_DUTY_STEP_PERCENT and the thermal
+//       limits above: a reasonable starting number, not a datasheet or
+//       spec-derived figure, chosen to sit clearly above "just a trickle
+//       from one source" and clearly below "both sources contributing" so
+//       the demo (e.g. blocking the solar panel) visibly changes which
+//       loads stay enabled. TUNE once you have real bench numbers for what
+//       solar-only vs. solar+wind power actually looks like.
+//
+// WHY:  This is the "enough power available" rule for LoadControl.cpp's
+//       load-shedding check -- the automatic check that has final say over
+//       a load relay even when the operator has tapped it ON, same layered
+//       pattern as the existing hard safety limits overriding manual duty
+//       cycle input.
+// ---------------------------------------------------------------------------
+#define LOAD_ENABLE_MIN_BATTERY_POWER_W 3.0
+
+// ---------------------------------------------------------------------------
+// BLOCK 29: buck converter -- gate drive pin and switching frequency
+//
+// WHAT: The pin carrying the PWM signal into the buck stage's gate driver,
+//       and the switching frequency -- taken directly from the validated
+//       LTspice design (12V in -> ~4.7-4.8V out, EPC2204 switch, 47uH
+//       inductor, 220uF output cap), not estimated.
+//
+// HOW:  Uses STM32's TIM1 Channel 2 (pin D1), NOT the boost converter's
+//       TIM8 Channel 2 (pin 11) -- a genuinely separate hardware timer,
+//       not just a different channel of the same one. Sharing TIM8
+//       between two independent converter modules would mean both
+//       BoostConverter.cpp and BuckConverter.cpp touching the same
+//       underlying timer peripheral's init/config, risking one module's
+//       code stepping on the other's channel. A separate timer keeps
+//       them fully independent, same as every other module boundary in
+//       this firmware.
+//
+// WHY THIS PIN/TIMER NEEDS BENCH VERIFICATION, NOT JUST TRUST: D1's TIM1
+//       CH2 mapping comes from a third-party reference (OpenMV's Giga
+//       pin docs), not Arduino's own pinout page, and that source's own
+//       tables didn't fully agree with each other in places. This is
+//       exactly the "looks right on paper" situation that burned us on
+//       the boost converter's PWM resolution (Mbed's PwmOut looked fine
+//       in the API docs too) -- confirm this pin actually drives TIM1 CH2
+//       correctly with a standalone test sketch (same approach as
+//       PWM_Giga_Test before BoostConverter.cpp was trusted) before this
+//       goes anywhere near the real gate driver.
+//
+//       100kHz matches the frequency actually used in the LTspice sim
+//       (PULSE period = 10us), and conveniently matches the boost
+//       converter's frequency too, though that's not required -- it's
+//       just what the validated design used.
+// ---------------------------------------------------------------------------
+#define BUCK_GATE_DRIVE_PIN   1
+#define BUCK_PWM_FREQUENCY_HZ 100000UL
+
+// ---------------------------------------------------------------------------
+// BLOCK 30: buck converter -- CV/CC regulation targets
+//
+// WHAT: The buck stage's control targets -- NOT a symmetric CC-then-CV
+//       charge profile like the boost converter's battery charging.
+//       This is CV-with-a-ceiling: BuckController.cpp holds 5.0V as the
+//       normal, moment-to-moment target (whatever current that takes,
+//       determined entirely by what's plugged into the load bus), and
+//       only backs off voltage to cap current at BUCK_CC_CEILING_A if
+//       combined load demand tries to exceed it.
+//
+// HOW:  BUCK_TARGET_VOLTAGE_V = 5.0 matches the block diagram's 12.8V->5V
+//       load bus (the LTspice sim's ~4.7-4.8V settled output reflects
+//       diode/inductor losses at that specific operating point -- 5.0V is
+//       the real target, not the lossy sim result).
+//
+//       BUCK_CC_CEILING_A = 2.0 is a calculated total, not a guess: EV
+//       charger (~1A via TP4056) + data center (~0.25A) + LED lamp
+//       (~0.15A) + other (~0.2A) = 1.6A, rounded up to 2.0A for margin --
+//       same ~50% headroom pattern as the boost converter's hard limits
+//       (1.0A CC target -> 1.5A hard limit). TUNE the three placeholder
+//       load estimates once real devices are chosen for data center/LED
+//       lamp/other.
+//
+// WHY THIS MEANS A COMPONENT CHANGE, NOT JUST A FIRMWARE NUMBER: the
+//       1N5819 diode in the current LTspice sim is only rated ~1A --
+//       undersized for a 2.0A ceiling. Swap it for an SB540 (5A/40V,
+//       already used elsewhere in this project for the solar/wind
+//       isolation diodes) before trusting this on real hardware. This
+//       constant describes what the FIRMWARE should target; it doesn't
+//       by itself make the current hardware capable of delivering it.
+// ---------------------------------------------------------------------------
+#define BUCK_TARGET_VOLTAGE_V 5.0
+#define BUCK_CC_CEILING_A     2.0
+
+// ---------------------------------------------------------------------------
+// BLOCK 31: WiFi dashboard -- network credentials and server port
+//
+// WHAT: The WiFi network the Giga joins, and the port its read-only status
+//       dashboard listens on.
+//
+// HOW:  Fill in WIFI_SSID/WIFI_PASSWORD with your actual network before
+//       uploading -- same as WiFi_Giga_Test.ino, which is where this
+//       library (WiFi.h) and this exact connection approach were first
+//       verified in isolation before being ported into the real firmware
+//       here. WEB_DASHBOARD_PORT 80 is the default HTTP port, so the
+//       dashboard is reachable by just typing the Giga's IP address into
+//       a browser with nothing extra appended.
+//
+// WHY:  This is a local-network-only feature (same room/lab during a
+//       demo), so a hardcoded SSID/password is an accepted simplification
+//       here, not an oversight -- see 01-Wiring-and-Assembly.md for the
+//       same reasoning already applied to the relay module's wiring.
+//       Don't commit your real WiFi password if this project's repo is
+//       ever made public.
+//
+// THIS IS STILL UNVERIFIED ON REAL HARDWARE: the WiFi.h library's API
+//       (WiFi.begin(), WiFiServer, WiFiClient) is assumed correct based on
+//       Arduino's own documentation and the standalone WiFi_Giga_Test.ino
+//       sketch, but that sketch itself has not yet been confirmed working
+//       on the actual board (hardware wasn't available at the time it was
+//       written). Treat this module the same way BoostConverter.cpp's
+//       TIM8 code was treated before its own oscilloscope confirmation --
+//       plausible, not yet proven.
+// ---------------------------------------------------------------------------
+#define WIFI_SSID          "YOUR_WIFI_NETWORK_NAME_HERE"
+#define WIFI_PASSWORD      "YOUR_WIFI_PASSWORD_HERE"
+#define WEB_DASHBOARD_PORT 80
 
 #endif
